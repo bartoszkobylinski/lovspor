@@ -1,26 +1,113 @@
 {
- "jobs": {
-  "sync": {
-   "checkouts": [
-    null
-   ],
-   "environment": null,
-   "if": null
+ "seal_script_pushes": [
+  "git -C \"$repo\" push -q origin \"refs/tags/$SEAL_TAG\""
+ ],
+ "workflows": {
+  "sync.yml": {
+   "concurrency": {
+    "cancel-in-progress": false,
+    "group": "sync"
+   },
+   "jobs": {
+    "seal": {
+     "checkouts": [
+      {
+       "persist-credentials": false,
+       "sparse-checkout": "scripts/seal/sign-and-tag.sh\nops/publication-signers\n",
+       "sparse-checkout-cone-mode": false
+      }
+     ],
+     "environment": "lovverk-seal",
+     "if": "${{ !cancelled() && needs.sync.outputs.seal_state == 'composed' && needs.sync.outputs.published == 'true' }}",
+     "matrix": null,
+     "needs": "sync",
+     "permissions": {
+      "contents": "read",
+      "issues": "write"
+     },
+     "pushes": [],
+     "scripts": [
+      "scripts/seal/sign-and-tag.sh"
+     ],
+     "secrets": [
+      "LOVVERK_DEPLOY_KEY",
+      "LOVVERK_SEAL_SIGNING_KEY"
+     ],
+     "uses": null,
+     "variables": [
+      "LOVVERK_SEAL_REQUIRED"
+     ]
+    },
+    "sync": {
+     "checkouts": [
+      {}
+     ],
+     "environment": "lovverk-sync",
+     "if": null,
+     "matrix": null,
+     "needs": null,
+     "permissions": null,
+     "pushes": [
+      "git push origin main",
+      "git push origin refs/notes/temporal-attestations"
+     ],
+     "scripts": [],
+     "secrets": [
+      "LOVVERK_DEPLOY_KEY",
+      "OPENAI_API_KEY"
+     ],
+     "uses": null,
+     "variables": [
+      "LOVVERK_SEAL_REQUIRED"
+     ]
+    }
+   },
+   "permissions": {
+    "contents": "read",
+    "issues": "write"
+   },
+   "triggers": {
+    "schedule": [
+     "0 4 * * *"
+    ],
+    "workflow_dispatch": {
+     "repair_embeddings": {
+      "default": false,
+      "type": "boolean"
+     }
+    }
+   }
+  },
+  "verify-lovverk-key.yml": {
+   "concurrency": null,
+   "jobs": {
+    "verify": {
+     "checkouts": [],
+     "environment": "${{ matrix.environment }}",
+     "if": "github.ref == 'refs/heads/main'",
+     "matrix": {
+      "environment": [
+       "lovverk-sync",
+       "lovverk-seal"
+      ]
+     },
+     "needs": null,
+     "permissions": null,
+     "pushes": [
+      "git -C \"$probe\" push --dry-run --porcelain \"$LOVVERK_URL\" \"HEAD:$PROBE_REF\""
+     ],
+     "scripts": [],
+     "secrets": [
+      "LOVVERK_DEPLOY_KEY"
+     ],
+     "uses": null,
+     "variables": []
+    }
+   },
+   "permissions": {},
+   "triggers": {
+    "workflow_dispatch": {}
+   }
   }
- },
- "pushes": [
-  "git push origin main",
-  "git push origin refs/notes/temporal-attestations"
- ],
- "schedule": [
-  "0 4 * * *"
- ],
- "secrets": [
-  "LOVVERK_DEPLOY_KEY",
-  "OPENAI_API_KEY"
- ],
- "triggers": [
-  "schedule",
-  "workflow_dispatch"
- ]
+ }
 }

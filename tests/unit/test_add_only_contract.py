@@ -24,9 +24,11 @@ Gates, with what each pins:
   the one importer outside them is ``ops_cli.py``, which registers operator
   commands.
 * G5 legal history is off: no setting, no MCP tool, no sync step reaches it.
-* G6 deployment boundary: ``sync.yml``'s triggers, checkout refs, secrets
-  and pushes are pinned, so a change to what reaches production is visible
-  in review (#898, #956).
+* G6 deployment boundary: every workflow that names the lovverk write key,
+  the seal key, a protected environment or the corpus remote, with its
+  triggers, permissions and, per job, guard, environment, checkouts, secrets,
+  variables, pushes and scripts; and the seal script's push (#898, #956,
+  #965), so a change to what reaches production is visible in review.
 * G7 destructive migration: no workflow applies an identity plan, rewrites
   history or force-pushes, and only the identity apply path writes
   ``identity.json``.
@@ -274,38 +276,104 @@ def test_g5_the_sync_workflow_runs_no_research_command() -> None:
 
 # --- G6 deployment boundary ---
 
+#: Names whose appearance in a workflow makes it part of the deployment boundary:
+#: the lovverk write key, the seal key, the two protected environments, the corpus remote.
+_BOUNDARY_MARKERS = re.compile(
+    r"LOVVERK_DEPLOY_KEY|LOVVERK_SEAL_SIGNING_KEY|lovverk-sync|lovverk-seal|"
+    r"github\.com[:/]bartoszkobylinski/lovverk"
+)
+_PUSH = re.compile(r"\bgit\b(?:\s+-C\s+\S+)?\s+push\b")
+SEAL_SCRIPT = ROOT / "scripts" / "seal" / "sign-and-tag.sh"
 
-def sync_boundary() -> dict[str, Any]:
-    """What in ``sync.yml`` decides which code reaches production and where it writes."""
-    workflow = yaml.safe_load((WORKFLOWS / "sync.yml").read_text(encoding="utf-8"))
-    text = (WORKFLOWS / "sync.yml").read_text(encoding="utf-8")
-    triggers = workflow.get(True) or workflow.get("on")
-    jobs = workflow["jobs"]
-    return {
-        "triggers": sorted(triggers),
-        "schedule": [entry["cron"] for entry in triggers.get("schedule", [])],
-        "jobs": {
-            name: {
-                "if": job.get("if"),
-                "environment": job.get("environment"),
-                "checkouts": [
-                    (step.get("with") or {}).get("ref")
-                    for step in job["steps"]
-                    if str(step.get("uses", "")).startswith("actions/checkout@")
-                ],
+
+def _pushes(text: str) -> list[str]:
+    return sorted(
+        {
+            line.strip()
+            for line in text.splitlines()
+            if _PUSH.search(line) and not line.lstrip().startswith("#")
+        }
+    )
+
+
+def _triggers(workflow: dict[Any, Any]) -> dict[str, Any]:
+    triggers = workflow.get(True) or workflow.get("on") or {}
+    if isinstance(triggers, str | list):
+        triggers = dict.fromkeys([triggers] if isinstance(triggers, str) else triggers)
+    found: dict[str, Any] = {}
+    for name, raw in sorted(triggers.items()):
+        spec = raw or {}
+        if name == "schedule":
+            found[name] = [entry["cron"] for entry in spec]
+        else:
+            inputs = spec.get("inputs") or {}
+            found[name] = {
+                key: {k: v for k, v in sorted(field.items()) if k != "description"}
+                for key, field in sorted(inputs.items())
             }
-            for name, job in sorted(jobs.items())
-        },
-        "secrets": sorted(set(re.findall(r"secrets\.([A-Z0-9_]+)", text))),
-        "pushes": sorted({line.strip() for line in text.splitlines() if "git push" in line}),
+    return found
+
+
+def _job_boundary(job: dict[str, Any]) -> dict[str, Any]:
+    steps = job.get("steps") or []
+    text = json.dumps(job, sort_keys=True)
+    runs = "\n".join(str(step.get("run", "")) for step in steps)
+    return {
+        "uses": job.get("uses"),
+        "if": job.get("if"),
+        "needs": job.get("needs"),
+        "environment": job.get("environment"),
+        "matrix": (job.get("strategy") or {}).get("matrix"),
+        "permissions": job.get("permissions"),
+        "checkouts": [
+            step.get("with") or {}
+            for step in steps
+            if str(step.get("uses", "")).startswith("actions/checkout@")
+        ],
+        "secrets": sorted(set(re.findall(r"secrets\.([A-Za-z0-9_]+)", text))),
+        "variables": sorted(set(re.findall(r"vars\.([A-Za-z0-9_]+)", text))),
+        "pushes": _pushes(runs),
+        "scripts": sorted(
+            {line.strip() for line in runs.splitlines() if line.strip().startswith("scripts/")}
+        ),
     }
 
 
-def test_g6_the_production_sync_boundary_is_unchanged() -> None:
-    """Today: schedule + manual dispatch, checkout of the dispatching ref (no ``ref:``),
-    no main-only guard, no environment (#898, #956). A change here changes what reaches
-    production, so it fails until the owner reviews it."""
-    assert json.loads(json.dumps(sync_boundary())) == _golden("sync-boundary.json")
+def deployment_boundary() -> dict[str, Any]:
+    """What decides which code reaches production, with which credentials, and where it writes.
+
+    Every workflow that names the lovverk write key, the seal key, a protected
+    environment or the corpus remote, with its triggers, permissions and, per job,
+    the guard, environment, checkouts, secrets, variables, pushes and the scripts it
+    runs; and the pushes of the seal script, which runs outside the workflow text.
+    """
+    workflows = {}
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        if not _BOUNDARY_MARKERS.search(text):
+            continue
+        workflow = yaml.safe_load(text)
+        workflows[path.name] = {
+            "triggers": _triggers(workflow),
+            "permissions": workflow.get("permissions"),
+            "concurrency": workflow.get("concurrency"),
+            "jobs": {name: _job_boundary(job) for name, job in sorted(workflow["jobs"].items())},
+        }
+    return {
+        "workflows": workflows,
+        "seal_script_pushes": _pushes(SEAL_SCRIPT.read_text(encoding="utf-8")),
+    }
+
+
+def test_g6_the_production_deployment_boundary_is_unchanged() -> None:
+    """The boundary as the owner-accepted publication-seal design left it (#965, merged
+    2026-11-19): ``sync.yml``'s ``sync`` job in ``lovverk-sync`` and its ``seal`` job in
+    ``lovverk-seal``, the seal key in the seal job only, the notes-then-main push and the
+    seal tag push, and the one-time ``verify-lovverk-key.yml`` check. Each environment's
+    deployment policy is a repository setting no file holds, so this gate cannot see it.
+    A change here changes what reaches production; it fails until the owner reviews the
+    golden in a pull request that names the change, its class and its evidence."""
+    assert json.loads(json.dumps(deployment_boundary())) == _golden("sync-boundary.json")
 
 
 # --- G7 destructive migration ---
