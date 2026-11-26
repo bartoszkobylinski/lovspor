@@ -11,8 +11,10 @@ policy cannot tell the two chains apart (an empty chain names no policy),
 ``PublicationSettings`` is unverified until AR7, the budget ledger is the
 caller's (ledger v2), and no owner-signed record names a quarantine chain. So
 the caller's source decides, at planning, preparation, authorization and the
-send. Those reproductions are strict ``xfail``: each fails the suite the moment
-a binding lands, until the owner chooses one.
+send. Those reproductions are strict ``xfail``: a properly anchored foreign
+chain can still be substituted in simulation. They stay the open #1037 blocker
+until AR7 provides the pin contract the binding needs; each fails the suite the
+moment a binding lands. Production never sends through it: it has no adapter.
 
 The legitimate configurations (one workspace; a second workspace sharing the
 ledger, on its own witness or on the same one) are pinned on both paths: the
@@ -28,7 +30,7 @@ import pytest
 from lovspor.forarbeider import publication_anchors, publication_ledger
 from lovspor.forarbeider.control_plane_witness import OfflineAnchorWitness
 from lovspor.forarbeider.errors import ForarbeiderRefusedError
-from lovspor.forarbeider.publication_execute import execute
+from lovspor.forarbeider.publication_execute import Production, execute
 from lovspor.forarbeider.publication_quarantine import (
     WitnessedSource,
     Witnessing,
@@ -169,6 +171,21 @@ def test_a_foreign_chain_that_quarantines_nothing_never_sends(publisher: Rig) ->
 
     assert outcome.status == "denied"
     assert reasons_of(outcome, "ar5_quarantine_anchor") != ()
+    assert remote_unchanged(publisher, github)
+
+
+def test_production_never_sends_through_a_foreign_chain(publisher: Rig) -> None:
+    """The open #1037 substitution is simulation-only: production has no adapter to send through."""
+    blocked(publisher)
+    substitute = foreign_of(publisher)
+    _, github = environment_of(publisher)
+
+    outcome = execute(publisher.request(quarantine=substitute), Production())
+
+    assert outcome.status == "denied"
+    assert reasons_of(outcome, "ar5_quarantine_anchor") == (
+        "quarantine_anchor_production_witness_ar7_pending",
+    )
     assert remote_unchanged(publisher, github)
 
 
