@@ -1,37 +1,56 @@
 """ADD-ONLY contract gates: legal history may be added, never at the existing product's cost.
 
 The owner's product goal is the existing Lovspor plus provision-level legal
-history and source-backed legislative provenance, as an addition. The
-contract these gates enforce is under owner review (not accepted). Each gate
-below pins one part of today's production
-surface. A failure means a change to that surface; it is decided by the owner,
-and the golden is never just refreshed to make a PR pass.
+history and source-backed legislative provenance, as an addition. The owner
+accepted the functional-preservation contract these gates implement on
+2026-11-20; it is kept privately. Its acceptance is the contract, not a
+permission to deploy: it authorises no implementation, and merging this module,
+like every change to its goldens, is a separate owner decision. Each gate below
+pins one part of the production surface. A failure means a change to that
+surface; the owner decides it, in a pull request that names each golden it
+changes, the class of that change and its evidence. A golden is never refreshed
+just to make a pull request pass, and no automation regenerates one.
 
-Gates, with what each pins:
+Gates, with what each pins and what it does not:
 
 * G1 URLs: every current document's canonical URL at lovverk ``c310127e``
   (5 905 documents) is still derived from its manifest record by the
   publisher's own route table, slug grammar and ``document_url``. The real
   301/410 map is pinned by digest and re-checked against a lovverk clone by
-  ``scripts/quality/capture_add_only_baseline.py --check``.
+  ``scripts/quality/capture_add_only_baseline.py --check``. ``c310127e`` is a
+  historical corpus state, frozen on purpose: G1 does not claim that the live
+  corpus still has 5 905 documents, and the pin is not moved to a newer corpus
+  head because lovverk moved on. URLs published after it are not covered here.
 * G2 MCP surface: the 18 tool names and each tool's parameter names. Adding
   a tool or a parameter fails here too, so an addition is reviewed as one.
-* G3 MCP temporal defaults: the wire output of the version and
-  ``recorded_at`` calls on a deterministic two-state git corpus. The 21
-  existing calls are pinned by ``test_mcp_existing_calls.py``.
+  Names only: parameter types, required fields, defaults and descriptions are
+  pinned by the schema hash of ``benchmarks/llhb/runner/tool-surface-v9.json``
+  (``test_llhb_mcp_surface.py``, compared on the apparatus interpreter only)
+  and by the wire output of existing calls (``test_mcp_existing_calls.py``),
+  not here.
+* G3 MCP temporal answers: the wire output of the version and
+  ``recorded_at`` calls on a deterministic two-state git corpus. A sample on a
+  fixture, not a replay of every document's real history. The 21 existing
+  calls are pinned by ``test_mcp_existing_calls.py``.
 * G4 research boundary: no production module imports ``lovspor.legaltime``,
   ``lovspor.crosswalk`` or ``lovspor.forarbeider``, statically or at runtime;
   the one importer outside them is ``ops_cli.py``, which registers operator
   commands.
 * G5 legal history is off: no setting, no MCP tool, no sync step reaches it.
+  G4 and G5 catch research wired into serving or sync by accident. They are
+  not a standing ban: an owner-approved additive tool, setting or sync step
+  lands by a pull request that changes these gates or their goldens, with the
+  owner's decision recorded for it.
 * G6 deployment boundary: every workflow that names the lovverk write key,
   the seal key, a protected environment or the corpus remote, with its
   triggers, permissions and, per job, guard, environment, checkouts, secrets,
   variables, pushes and scripts; and the seal script's push (#898, #956,
-  #965), so a change to what reaches production is visible in review.
+  #965). It pins workflow text. Who may deploy to an environment is a
+  repository setting it cannot read.
 * G7 destructive migration: no workflow applies an identity plan, rewrites
   history or force-pushes, and only the identity apply path writes
-  ``identity.json``.
+  ``identity.json``. A pattern tripwire, not a proof that no workflow can
+  destroy history.
 """
 
 import ast
