@@ -22,14 +22,25 @@ SHA_A = "a" * 40
 SHA_B = "0123456789abcdef0123456789abcdef01234567"
 
 
+def _committed_header() -> bytes:
+    """The committed pin file with every pin line removed: comments and blanks only."""
+    lines = (ROOT / PIN_FILE).read_bytes().splitlines(keepends=True)
+    return b"".join(line for line in lines if not line.strip() or line.startswith(b"#"))
+
+
 def _problems(data: bytes) -> list[str]:
     with pytest.raises(PinFileError) as caught:
         parse_pin_file(data)
     return caught.value.problems
 
 
-def test_committed_pin_file_is_valid_and_holds_no_pin() -> None:
-    assert load_pin_file(ROOT / PIN_FILE) == ()
+def test_committed_pin_file_is_valid() -> None:
+    """The committed file parses; it may hold pins, so the count is not fixed."""
+    assert isinstance(load_pin_file(ROOT / PIN_FILE), tuple)
+
+
+def test_committed_header_alone_holds_no_pin() -> None:
+    assert parse_pin_file(_committed_header()) == ()
 
 
 def test_sync_workflow_reads_the_pin_file_only_in_the_apply_step() -> None:
@@ -170,6 +181,14 @@ def _check(*args: str) -> tuple[int, str, str]:
 
 def test_cli_accepts_the_committed_file() -> None:
     code, out, err = _check("--file", str(ROOT / PIN_FILE))
+    assert (code, err) == (0, "")
+    assert out.startswith(f"ok {ROOT / PIN_FILE}: ")
+
+
+def test_cli_accepts_the_committed_header(tmp_path: Path) -> None:
+    pin_file = tmp_path / "pins"
+    pin_file.write_bytes(_committed_header())
+    code, out, err = _check("--file", str(pin_file))
     assert (code, err) == (0, "")
     assert out.endswith(": 0 pins\n")
 

@@ -29,6 +29,12 @@ DOC = "lokale-forskrifter/5025/doc.md"
 CONTEXT = RunContext("a" * 40, "7")
 
 
+def _committed_header() -> bytes:
+    """The committed pin file with every pin line removed, so a real pin keeps these tests valid."""
+    lines = (ROOT / "ops/lovverk-owner-changes").read_bytes().splitlines(keepends=True)
+    return b"".join(line for line in lines if not line.strip() or line.startswith(b"#"))
+
+
 class Lovverk:
     """A bare origin, an owner checkout that opens pull requests, and the sync's clone."""
 
@@ -97,7 +103,7 @@ def test_empty_pin_file_makes_no_git_call(tmp_path: Path, monkeypatch: pytest.Mo
 
     monkeypatch.setattr("lovspor.owner_changes_apply.subprocess.run", no_subprocess)
     pins = tmp_path / "pins"
-    pins.write_text((ROOT / "ops/lovverk-owner-changes").read_text(encoding="utf-8"))
+    pins.write_bytes(_committed_header())
     report = apply_pins(tmp_path / "no-such-clone", pins, CONTEXT)
     assert (report.file_problems, report.applied, report.refused, report.skipped) == (
         [],
@@ -324,7 +330,9 @@ def test_cli_apply_and_check_applied(lovverk: Lovverk) -> None:
     assert _cli("check-applied", "--corpus-path", corpus, "--report", str(report)).exit_code == 1
 
 
-def test_cli_apply_with_the_committed_file_reports_nothing(tmp_path: Path) -> None:
+def test_cli_apply_with_the_committed_header_reports_nothing(tmp_path: Path) -> None:
+    pins = tmp_path / "pins"
+    pins.write_bytes(_committed_header())
     report = tmp_path / "report.json"
     result = _cli(
         "apply",
@@ -333,7 +341,7 @@ def test_cli_apply_with_the_committed_file_reports_nothing(tmp_path: Path) -> No
         "--report",
         str(report),
         "--file",
-        str(ROOT / "ops/lovverk-owner-changes"),
+        str(pins),
     )
     assert result.exit_code == 0
     assert result.stdout == "no pinned owner change\n"
