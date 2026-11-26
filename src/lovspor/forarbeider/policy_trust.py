@@ -9,9 +9,17 @@ The trust root is two files in OpenSSH formats, the same mechanism the
 crosswalk approval uses (``ssh-keygen -Y``, #792, #840):
 
 - ``policy-signers`` (allowed_signers): every entry names one role by its
-  namespaces, either the owner's policy key (``lovspor-forarbeider-policy``
-  only) or the bot's execution key (``lovspor-forarbeider-release`` and/or
-  ``lovspor-forarbeider-publication``), and carries a UTC validity window. A
+  namespaces, either the owner's key (any of ``lovspor-forarbeider-policy``,
+  ``lovspor-forarbeider-limits``, ``lovspor-forarbeider-control``,
+  ``lovspor-forarbeider-inventory`` and ``lovspor-forarbeider-quarantine``;
+  AR1b added the limits and control namespaces for signed limits and
+  stop/resume records, AR2 the inventory
+  namespace for the owner-signed document inventory, AR3 the quarantine
+  namespace for owner-signed quarantine exceptions) or the bot's
+  execution key (``lovspor-forarbeider-release`` and/or
+  ``lovspor-forarbeider-publication``), or, since AR5a, the anchor
+  witness's key (``lovspor-forarbeider-anchor`` only: the authority outside
+  the runner that countersigns control-plane anchors), and carries a UTC validity window. A
   key holding both roles, a wildcard principal, an entry without a window, any
   other option or a key listed twice refuses the whole root;
 - ``revoked-keys``: public keys no verification accepts.
@@ -43,8 +51,22 @@ from lovspor.ssh_signature import SshVerification, ssh_verify
 POLICY_NAMESPACE = "lovspor-forarbeider-policy"
 RELEASE_NAMESPACE = "lovspor-forarbeider-release"
 PUBLICATION_NAMESPACE = "lovspor-forarbeider-publication"
-OWNER_NAMESPACES = frozenset({POLICY_NAMESPACE})
+LIMITS_NAMESPACE = "lovspor-forarbeider-limits"
+CONTROL_NAMESPACE = "lovspor-forarbeider-control"
+INVENTORY_NAMESPACE = "lovspor-forarbeider-inventory"
+QUARANTINE_NAMESPACE = "lovspor-forarbeider-quarantine"
+ANCHOR_NAMESPACE = "lovspor-forarbeider-anchor"
+OWNER_NAMESPACES = frozenset(
+    {
+        POLICY_NAMESPACE,
+        LIMITS_NAMESPACE,
+        CONTROL_NAMESPACE,
+        INVENTORY_NAMESPACE,
+        QUARANTINE_NAMESPACE,
+    }
+)
 BOT_NAMESPACES = frozenset({RELEASE_NAMESPACE, PUBLICATION_NAMESPACE})
+WITNESS_NAMESPACES = frozenset({ANCHOR_NAMESPACE})
 TRUST_DIRECTORY = Path(__file__).with_name("trust")
 SIGNERS_FILE = "policy-signers"
 REVOKED_FILE = "revoked-keys"
@@ -62,7 +84,7 @@ _INSTANT = re.compile(r"^\d{14}Z$")
 _GOOD = re.compile(r'^Good "([^"]+)" signature for (\S+) with ED25519 key (SHA256:\S+)$')
 _ARMOR = ("-----BEGIN SSH SIGNATURE-----", "-----END SSH SIGNATURE-----")
 
-Role = Literal["owner_policy", "bot_execution"]
+Role = Literal["owner_policy", "bot_execution", "anchor_witness"]
 Origin = Literal["engine_pinned", "unpinned"]
 
 
@@ -191,11 +213,15 @@ def _instant(value: str) -> datetime:
 
 
 def _role(namespaces: frozenset[str]) -> Role:
-    if namespaces == OWNER_NAMESPACES:
+    if namespaces and namespaces <= OWNER_NAMESPACES:
         return "owner_policy"
     if namespaces and namespaces <= BOT_NAMESPACES:
         return "bot_execution"
-    raise _refused("an entry must hold exactly one role: owner policy or bot execution")
+    if namespaces and namespaces <= WITNESS_NAMESPACES:
+        return "anchor_witness"
+    raise _refused(
+        "an entry must hold exactly one role: owner policy, bot execution or anchor witness"
+    )
 
 
 def _public_key(fields: list[str]) -> bytes:

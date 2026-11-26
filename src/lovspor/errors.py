@@ -471,6 +471,14 @@ class EmbeddingBudgetError(LovsporError):
     """
 
 
+class EmbeddingResponseError(LovsporError):
+    """The provider answered a paid embedding call with vectors the sidecar cannot hold.
+
+    Wrong shape or non-finite values: the document's sidecar is not written,
+    so no half-valid file is published (#919 changed-fragment path).
+    """
+
+
 class RegjeringenFetchError(LovsporError):
     """An explicit-list fetch of regjeringen.no pages was refused (#738).
 

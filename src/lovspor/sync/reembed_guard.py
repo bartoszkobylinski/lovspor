@@ -25,8 +25,10 @@ still applies at every size, so real spend is never waved through.
 """
 
 OVERRIDE_HINT = (
-    "re-run with 'lovspor sync --allow-mass-reembed' or raise "
-    "LOVSPOR_REEMBED_GUARD_MAX_FRACTION / LOVSPOR_REEMBED_GUARD_MAX_TOKENS."
+    "it is an owner decision: the scheduled workflow never overrides this guard, and "
+    "the only override is a local 'lovspor sync --allow-mass-reembed' (or raised "
+    "LOVSPOR_REEMBED_GUARD_MAX_FRACTION / LOVSPOR_REEMBED_GUARD_MAX_TOKENS), which runs "
+    "outside sync.yml's audit and attestation steps (#923)."
 )
 
 

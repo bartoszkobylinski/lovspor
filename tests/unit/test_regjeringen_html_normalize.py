@@ -7,7 +7,9 @@ the grammar, is left as served, so a change there still changes the digest.
 """
 
 import hashlib
+import signal
 import time
+from types import FrameType
 
 import pytest
 
@@ -247,6 +249,56 @@ def test_non_ascii_and_invalid_utf8_bytes_are_preserved() -> None:
     assert normalize_regjeringen_html(page) == expected
 
 
+# Outside start tags: comments, end tags and bogus comments, and where the scan resumes.
+
+
+def _normalized_within_seconds(page: bytes, seconds: float = 2.0) -> bytes:
+    """``normalize_regjeringen_html(page)``, failing instead of hanging if the scan loops."""
+
+    def stuck(_signal: int, _frame: FrameType | None) -> None:
+        pytest.fail(f"the scan did not finish within {seconds} s")
+
+    previous = signal.signal(signal.SIGALRM, stuck)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        return normalize_regjeringen_html(page)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        b'<!-- a > <b nonce="QUJD"> -->',  # a ">" inside a comment does not end it
+        b"</p title='> <a nonce=\"QUJD\">'>",  # an end tag ends after its quoted values
+        b'</ <b nonce="QUJD">',  # "</" without a letter is a bogus comment up to ">"
+        b'ab <?x nonce="QUJD"',  # an unterminated bogus comment: the rest is text
+        b"<i>x</i> <!",  # a bogus comment cut off right after "<!"
+    ],
+)
+def test_markup_inside_a_skipped_construct_is_left_as_served(page: bytes) -> None:
+    assert _normalized_within_seconds(page) == page
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (b"<!-- x -->", b"<!-- y -->"),  # a comment ends at its first "-->"
+        (b"<!---->", b""),  # an empty comment
+        (b"<!--<!-->", b" -->"),  # "<!--" inside a comment does not open another
+        (b"<!x>", b""),  # a bogus comment ends at its ">"
+        (b"<!>", b""),  # a bogus comment ends at the ">" right after "<!"
+        (b"< ", b""),  # a "<" at the very start that opens nothing
+        (b"</style>", b""),  # an end tag before a raw-text element does not close it
+    ],
+)
+def test_a_tag_after_a_skipped_construct_is_normalized(before: bytes, after: bytes) -> None:
+    page = before + b'<b nonce="QUJD"><style nonce="QUJD">p{}</style>' + after
+    expected = before + b'<b nonce="NONCE"><style nonce="NONCE">p{}</style>' + after
+    assert _normalized_within_seconds(page) == expected
+
+
 @pytest.mark.parametrize(
     "unit",
     [
@@ -305,3 +357,76 @@ def test_meta_nonce_and_content_are_replaced_without_losing_intervening_bytes() 
     expected = b'<meta nonce="NONCE" data-x="keep" content="NONCE" name="csp-nonce">'
     assert normalize_regjeringen_html(page) == expected
     assert normalize_regjeringen_html(expected) == expected
+
+
+# The start-tag grammar: what still counts as a tag, and where the scan resumes.
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        '<b class=x nonce="{v}">',  # an unquoted value beside the nonce
+        '<b x="" nonce="{v}">',  # an empty quoted value beside the nonce
+    ],
+)
+def test_other_attribute_value_forms_keep_the_tag_grammatical(tag: str) -> None:
+    page = tag.format(v="QUJD").encode()
+    assert normalize_regjeringen_html(page) == tag.format(v="NONCE").encode()
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        b'<b nonce="QUJD" x=>',  # "=" with no value before ">"
+        b'<b nonce="QUJD" x=> >',  # the ">" is not a value, so the tag never closes
+        b'<b nonce="QUJD" x=',  # "=" at the end of the page
+    ],
+)
+def test_an_equals_sign_without_a_value_breaks_the_tag(page: bytes) -> None:
+    assert normalize_regjeringen_html(page) == page
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        b"<b x=>",  # broke at a ">" where a value belongs
+        b"<b =",  # broke at an "=" where a name belongs
+        b"<",  # a "<" not followed by a letter
+        b"<br/>",  # not broken: a self-closing tag ends after "/>"
+    ],
+)
+def test_the_scan_resumes_right_after_the_byte_where_a_tag_ended(broken: bytes) -> None:
+    page = broken + b'<i nonce="QUJD">'
+    assert normalize_regjeringen_html(page) == broken + b'<i nonce="NONCE">'
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        b"<b x=",  # a "<" where a value belongs
+        b"<b ",  # a "<" where an attribute name belongs
+        b"<b x='",  # an unterminated quote runs to the end of the page
+    ],
+)
+def test_the_byte_where_a_tag_broke_is_never_scanned_again(broken: bytes) -> None:
+    page = broken + b'<i nonce="QUJD">'
+    assert normalize_regjeringen_html(page) == page
+
+
+def test_an_unquoted_csp_meta_name_counts_as_a_second_csp_meta() -> None:
+    page = b'<meta name=csp-nonce content="WFla"><meta name="csp-nonce" content="QUJD">'
+    assert normalize_regjeringen_html(page) == page
+
+
+def test_a_one_letter_self_closing_tag_is_scanned_past() -> None:
+    def stuck(_signal: int, _frame: FrameType | None) -> None:
+        pytest.fail("the scan did not move past <a/>")
+
+    previous = signal.signal(signal.SIGALRM, stuck)
+    signal.setitimer(signal.ITIMER_REAL, 5)
+    try:
+        normalized = normalize_regjeringen_html(b'<a/><b nonce="QUJD">')
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+    assert normalized == b'<a/><b nonce="NONCE">'

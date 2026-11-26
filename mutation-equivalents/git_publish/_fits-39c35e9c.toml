@@ -1,0 +1,16 @@
+[[equivalent]]
+file = "src/lovspor/git_publish.py"
+symbol = "_fits"
+registered = "2026-11-22, from register key be927db61e1fae3c (GREEN under scripts/ci/mutant_check.py try with the PR #1007 tests)"
+mutation = """
+-    return all(p(a) if callable(p) else p == a for a, p in zip(argv, shape, strict=True))
++    return all(p(a) if callable(p) else p == a for a, p in zip(argv, shape, strict=False))
+"""
+justification = """
+`_fits` returns `False` on the line above unless `len(argv) == len(shape)`,
+so the `zip` here always pairs two sequences of equal length. `strict` only
+changes what `zip` does when the lengths differ (raise instead of stopping at
+the shorter one); on equal lengths `strict=True`, `strict=False`, `strict=None`
+and the default all yield exactly the same pairs. Same verdict for every
+argument vector.
+"""

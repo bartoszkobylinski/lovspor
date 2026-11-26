@@ -1907,7 +1907,8 @@ def test_dependabot_prs_skip_the_codex_lanes_and_still_reach_ready() -> None:
     every dependency bump landed in `needs-human:pipeline`. The lanes are
     skipped for that actor, and `ready` — behind fast-ci — accepts a skipped
     lane for a same-repo PR (mutation is nightly now, see the ready test).
-    The author also runs only once, when the PR becomes ready."""
+    The author also runs only once, when the PR becomes ready, and not at all
+    for a pull request that changes nothing outside tests/ (#986)."""
     jobs = _workflow("pr-pipeline.yml")["jobs"]
     same_repo_non_dependabot = (
         "github.event.pull_request.head.repo.full_name == github.repository "
@@ -1916,9 +1917,11 @@ def test_dependabot_prs_skip_the_codex_lanes_and_still_reach_ready() -> None:
 
     author = " ".join(jobs["codex-author"]["if"].split())
     assert author == (
-        f"github.event_name == 'pull_request' && {same_repo_non_dependabot} && "
+        f"!cancelled() && github.event_name == 'pull_request' && {same_repo_non_dependabot} && "
         "(github.event.action == 'ready_for_review' || "
-        "(github.event.action == 'opened' && github.event.pull_request.draft == false))"
+        "(github.event.action == 'opened' && github.event.pull_request.draft == false)) && "
+        "needs.diff-scope.outputs.tests_only != 'true' && "
+        "needs.diff-scope.outputs.pin_only != 'true'"
     )
     assert jobs["codex-tests"]["if"] == (
         f"${{{{ !cancelled() && needs.codex-author.result != 'skipped' && "

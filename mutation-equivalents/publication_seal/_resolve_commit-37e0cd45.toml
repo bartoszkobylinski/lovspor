@@ -1,0 +1,17 @@
+[[equivalent]]
+file = "src/lovspor/publication_seal.py"
+symbol = "_resolve_commit"
+registered = "2026-11-22, from register key 3a9b14c57ad55214 (GREEN under scripts/ci/mutant_check.py try with the PR #1010 tests)"
+mutation = '''
+-    args = ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{rev}^{{commit}}"]
++    args = ["rev-parse", "--verify", "--QUIET", "--end-of-options", f"{rev}^{{commit}}"]
+'''
+justification = """
+`_resolve_commit` reads only the exit status (zero or not) and stdout; stderr
+is discarded. `--quiet` only silences the "Needed a single revision" message
+on stderr. With the unknown `--QUIET`, `git rev-parse --verify` prints the same
+object id for a revision that resolves, and exits non-zero (128 instead of 1)
+for one that does not. Both outcomes `_resolve_commit` can see are therefore
+the same. The assumption test pins this git behaviour.
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_git_rev_parse_verify_ignores_an_unknown_quiet_spelling"

@@ -20,28 +20,28 @@ from tests.unit.test_mutation_ledger import F, _meta, _write_meta, ledger
     [
         (1, 1),
         (3, 3),
-        (0, None),
+        (0, 0),
         (2, None),
         (5, None),
         (33, None),
         (34, None),
         (35, None),
-        (36, None),
+        (36, 36),
         (37, None),
-        (-24, None),
-        (24, None),
-        (152, None),
-        (255, None),
+        (-24, -24),
+        (24, 24),
+        (152, 152),
+        (255, 255),
         (-11, None),
         (-9, None),
         (99, None),
         (None, None),
     ],
 )
-def test_restore_carries_kills_and_resets_every_other_status(
+def test_restore_carries_kills_survivors_and_timeouts_and_resets_the_rest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int | None, expected: int | None
 ) -> None:
-    """docs/agentic-ci.md: only killed results carry over, including no suspicious passes."""
+    """docs/agentic-ci.md: killed, survived and timeout carry over; suspicious never does."""
     monkeypatch.chdir(tmp_path)
     _write_meta(tmp_path, "mod.py.meta", {F + "1": code})
     archive = tmp_path / "ledger.tar.gz"
@@ -117,3 +117,47 @@ def test_failed_checkpoint_keeps_the_previous_readable_archive(
 
     assert archive.read_bytes() == previous
     assert ledger.unpack(archive).kept == 1
+
+
+def test_repeated_checkpoints_preserve_results_and_metadata_but_retry_untrusted_statuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The nightly carry contract applies across checkpoints, including result timings."""
+    monkeypatch.chdir(tmp_path)
+    codes = {F + "1": 0, F + "2": 36, F + "3": 1, F + "4": 35, F + "5": None}
+    meta = _meta(codes)
+    meta["durations_by_key"] = {key: index + 0.25 for index, key in enumerate(codes)}
+    meta["estimated_durations_by_key"] = dict.fromkeys(codes, 2.5)
+    path = _write_meta(tmp_path, "src/lovspor/mod.py.meta", codes)
+    path.write_text(json.dumps(meta), encoding="utf-8")
+    expected = {**meta, "exit_code_by_key": {**codes, F + "4": None}}
+    archive = tmp_path / "ledger.tar.gz"
+
+    for night in range(2):
+        assert ledger.pack(archive) == 1
+        path.unlink()
+        tally = ledger.unpack(archive)
+
+        assert json.loads(path.read_text(encoding="utf-8")) == expected
+        assert (tally.files, tally.kept, tally.reset, tally.dropped) == (1, 3, 1 - night, 0)
+        results = ledger.results_by_key(tmp_path)
+        assert ledger.select([F + "*"], results) == [F + "4", F + "5"]
+        assert ledger.select(list(codes), results) == [F + "4", F + "5"]
+
+
+@pytest.mark.parametrize("code", [0, 36])
+def test_fully_carried_survivors_or_timeouts_select_one_result_for_reporting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    """With no pending work, select must still choose one in-scope result for the tally."""
+    monkeypatch.chdir(tmp_path)
+    _write_meta(tmp_path, "mod.py.meta", {F + "2": code, F + "1": code})
+    archive = tmp_path / "ledger.tar.gz"
+    ledger.pack(archive)
+
+    tally = ledger.unpack(archive)
+
+    assert (tally.kept, tally.reset) == (2, 0)
+    results = ledger.results_by_key(tmp_path)
+    assert ledger.select([F + "*"], results) == [F + "1"]
+    assert ledger.select([F + "2"], results) == [F + "2"]

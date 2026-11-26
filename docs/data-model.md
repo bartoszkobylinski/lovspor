@@ -29,7 +29,7 @@ touched.
 | `<dataset>/INDEX.md` | Alphabetical discovery list for a dataset | `_IndexFrontMatter` |
 | `<dataset>/history/<slug>.json` | Machine-readable per-act change history | `HistoryRecord` |
 | `<dataset>/history/<slug>.md` | Human-readable twin of the above | `_HistoryFrontMatter` |
-| `<dataset>/history/by-id/<doc_id>.json` | One document's events only, append-only, each with the path it had (#871) | `IdentityHistory` |
+| `<dataset>/history/by-id/<doc_id>.json` | One document's events only, append-only, each with the path it had (#871). Also written for a slug's previous holder whenever `history/<slug>.json` names another document than the one being written (a legacy-mode reassignment, or an enforced registry's later owner): that holder's lineage, extracted from git with the same rename tracking and identity boundary, is merged in before the slug file is overwritten. The holder's record is looked up in the records of the run being written, not in the prior `manifest.json`. A holder with a record under another path (it moved) has its own lineage there: when it is current, only the events its own lineage lacks are added, since its own sync writes the rest; when it is removed, its own lineage is added as well, since no sync of its own writes it again. A commit the by-id file already holds is never added again, so a holder displaced from more than one path (it moved, and both paths were taken) keeps its move once, under the path of whichever displacement is written first. A by-id file that cannot be merged is logged and left unchanged | `IdentityHistory` |
 | `<dataset>/embeddings/<slug>.bin` | int8-quantized per-section vectors (LSPE) | `EmbeddingFile` — see [`embeddings.md`](embeddings.md) |
 | `manifest.json` (corpus root) | The change-detection ledger; a record is tombstoned, never dropped (#871) | `Manifest` + `ManifestRecord` |
 | `slugs.json` (corpus root) | Slug ownership registry: `directory → slug → {owner, assigned_at, basis, prior_holders?}`, entries immutable and append-only. `basis` is `first-holder`, or `threshold-exception` for an owner the migration's U1 threshold kept although the documents in `prior_holders` held the slug first (a migration exception, not a claim of first ownership). Created only by applying the #871 migration, never by the sync | `SlugRegistry` |
@@ -96,6 +96,7 @@ defaults) — the XML cannot supply provenance, so the caller provides it.
 | `embedding_space` | `str \| None` | `None` |
 | `embedding_space_id` | `str \| None` | `None` |
 | `embedding_input_hash` | `str \| None` | `None` |
+| `embedding_sidecar_sha256` | `str \| None` | `None` (omitted from the JSON) |
 | `removed_reason` | `str \| None` | `None` |
 
 The optional fields default to `None` for backward compatibility with older-sprint
@@ -117,6 +118,14 @@ none), and crucially **absence alone never makes a record stale** — an identit
 record is refused by search but is not silently re-embedded. Both fields apply to
 `current` records only. The full ESI definition, canonical serialization and staleness
 rules live in `docs/embeddings.md` — this table deliberately does not restate them.
+
+`embedding_sidecar_sha256` (#936) is the SHA-256 of the sidecar bytes a keyed writer
+wrote: the sidecar's quantization provenance. Delta embedding reuses committed int8
+rows only from a sidecar whose bytes match it or, when it is absent, from the audited
+legacy set `src/lovspor/embeddings/attested_sidecars.txt` (sidecar digest paired with the
+record's `embedding_input_hash`); any other sidecar has unknown
+provenance and its document is re-embedded in full. While `None` the key is left out of
+`manifest.json`, so manifests that never carried it serialize byte-identically.
 
 `embedding_input_hash` records the **Embedding Input Identity** (ADR-0006): the
 canonical SHA-256 of the exact ordered `(section_id, chunk_text)` stream the sidecar's

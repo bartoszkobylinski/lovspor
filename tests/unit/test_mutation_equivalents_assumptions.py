@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import tomllib
+import types
 import typing
 from datetime import UTC, datetime
 from email.message import EmailMessage
@@ -36,10 +37,14 @@ import pytest
 import typer
 from lxml import etree, html
 from mcp.types import JSONRPCMessage
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
+from lovspor import git_publish
+from lovspor.identity.audit import CollisionAudit, HolderFate, SlugFate
+from lovspor.identity.migration import RegistryConflict, Rename, RestoredTombstone
+from lovspor.identity.plan import HistoryMismatch, Threshold, plan_migration
 from lovspor.innsyn.sender import Sender
 from lovspor.observatory.freshness_index import StoredRun
 from lovspor.observatory.listing import safe_html_parser
@@ -59,6 +64,7 @@ from tests.unit.site_fixtures import (
     throwaway_checkout,
     unobserved_transport,
 )
+from tests.unit.test_identity_migration import _base_repo
 
 _ROOT = Path(__file__).resolve().parents[2]
 _REGISTER = _ROOT / "mutation-equivalents"
@@ -817,6 +823,50 @@ def test_assumption_os_link_follow_symlinks_none_does_not_follow(tmp_path: Path)
     assert not (tmp_path / "true").is_symlink()
 
 
+def test_assumption_os_stat_follow_symlinks_none_does_not_follow(tmp_path: Path) -> None:
+    """Pins mutation-equivalents/forarbeider.release_lock/_at_name-*.toml.
+
+    Called the way ``_at_name`` calls it, with a directory descriptor, ``None``
+    reports the symlink itself exactly as ``False`` does, and ``True`` follows
+    it: the flag is honoured, so only ``None`` is equivalent.
+    """
+    (tmp_path / "target").write_bytes(b"x")
+    (tmp_path / "symlink").symlink_to(tmp_path / "target")
+    handle = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        found = {
+            value: os.stat("symlink", dir_fd=handle, follow_symlinks=value)  # type: ignore[arg-type]
+            for value in (None, False, True)
+        }
+    finally:
+        os.close(handle)
+    link = (tmp_path / "symlink").lstat()
+    target = (tmp_path / "target").stat()
+    assert found[None].st_ino == found[False].st_ino == link.st_ino
+    assert found[True].st_ino == target.st_ino != link.st_ino
+
+
+def test_assumption_git_hash_object_refuses_empty_and_junk_commit_input_alike(
+    tmp_path: Path,
+) -> None:
+    """Pins mutation-equivalents/git_publish/run_git-*.toml (default input ``b"XXXX"``).
+
+    Of the allowed commands only ``hash-object -t commit -w --stdin`` reads its
+    input, and Git's fsck refuses ``b""`` and ``b"XXXX"`` with the same code,
+    output and message, so the default input cannot change an answer.
+    """
+    bare = tmp_path / "remote.git"
+    init = ("init", "--bare", "--quiet", "--template=", "--initial-branch=main", str(bare))
+    assert git_publish.run_git(tmp_path, init).code == 0
+    command = ("hash-object", "-t", "commit", "-w", "--stdin")
+    stored_before = sorted((bare / "objects").rglob("*"))
+    empty = git_publish.run_git(bare, command, b"")
+    junk = git_publish.run_git(bare, command, b"XXXX")
+    assert empty.code != 0
+    assert (empty.code, empty.out, empty.err) == (junk.code, junk.out, junk.err)
+    assert sorted((bare / "objects").rglob("*")) == stored_before  # neither input wrote
+
+
 def test_assumption_typing_cast_returns_its_value_unchanged() -> None:
     """Pins mutation-equivalents/embeddings.cache/quantized_document_vectors-*.toml."""
     scale = 0.0123
@@ -879,3 +929,98 @@ def test_assumption_httpx_follow_redirects_none_does_not_follow() -> None:
                 assert reply.status_code == 302, value
         assert seen == ["https://example.org/from"] * 2
         assert client.get("https://example.org/from").status_code == 200
+
+
+def test_assumption_git_rev_parse_verify_ignores_an_unknown_quiet_spelling(
+    tmp_path: Path,
+) -> None:
+    """Pins the argument that waives ``--QUIET`` for ``--quiet`` in
+    ``publication_seal.py::_resolve_commit``: ``git rev-parse --verify`` prints
+    the same id with either spelling when the revision resolves, and exits
+    non-zero with either when it does not; only stderr, which is discarded,
+    tells them apart."""
+    root, head = throwaway_checkout(tmp_path / "committed")
+
+    def rev_parse(flag: str, rev: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--verify", flag, "--end-of-options", rev],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    for flag in ("--quiet", "--QUIET"):
+        found = rev_parse(flag, "HEAD^{commit}")
+        assert (found.returncode, found.stdout.strip()) == (0, head)
+        missing = rev_parse(flag, "absent^{commit}")
+        assert missing.returncode != 0
+        assert missing.stdout == ""
+
+
+_REPORT_ROW_MODELS: tuple[type[BaseModel], ...] = (
+    SlugFate,
+    HolderFate,
+    Rename,
+    CollisionAudit,
+    HistoryMismatch,
+    RegistryConflict,
+    RestoredTombstone,
+    Threshold,
+)
+
+
+def _json_native(annotation: object) -> bool:
+    """A field type whose python-mode dump already equals its json-mode dump."""
+    if annotation in (str, int, bool, type(None)) or annotation in _REPORT_ROW_MODELS:
+        return True
+    origin = typing.get_origin(annotation)
+    if origin in (list, typing.Union, types.UnionType):
+        return all(_json_native(arg) for arg in typing.get_args(annotation))
+    return False
+
+
+def test_assumption_pydantic_dumps_any_mode_but_json_as_python() -> None:
+    """Pins the argument behind the ``model_dump(mode=...)`` entries of
+    ``identity/report.py`` (``report_data``, ``_review_lists``): pydantic treats
+    every mode but "json" as "python", and the dumped models hold only types
+    for which the two modes agree, so the mutated modes dump equal dicts."""
+
+    class Probe(BaseModel):
+        values: tuple[int, ...] = (1,)
+        at: datetime = datetime(2026, 1, 1, tzinfo=UTC)
+
+    probe = Probe()
+    assert probe.model_dump(mode="json") != probe.model_dump(mode="python")
+    for mode in ("JSON", "XXjsonXX", None):
+        assert probe.model_dump(mode=mode) == probe.model_dump(mode="python")  # type: ignore[arg-type]
+    for model in _REPORT_ROW_MODELS:
+        for name, field in model.model_fields.items():
+            assert _json_native(field.annotation), f"{model.__name__}.{name}: {field.annotation}"
+        # A computed field or a custom serializer can make the modes differ with no
+        # declared field changing, so none may exist on a dumped model.
+        decorators = model.__pydantic_decorators__
+        assert not model.model_computed_fields, model.__name__
+        assert not decorators.field_serializers, model.__name__
+        assert not decorators.model_serializers, model.__name__
+
+
+def test_assumption_real_report_rows_dump_alike_in_json_and_python_mode(
+    tmp_path: Path,
+) -> None:
+    """The rows a real plan holds dump to equal dicts in both modes (same argument)."""
+    repo, shas = _base_repo(tmp_path)
+    rows: list[BaseModel] = []
+    for plan in (plan_migration(repo, "HEAD"), plan_migration(repo, "HEAD", shas["r4"])):
+        rows += [
+            plan.threshold,
+            *plan.restored,
+            *plan.fates,
+            *plan.renames,
+            *plan.collisions,
+            *plan.history_mismatches,
+            *plan.registry_conflicts,
+        ]
+    dumped = {type(row) for row in rows}
+    assert {Threshold, RestoredTombstone, SlugFate, Rename, CollisionAudit} <= dumped
+    for row in rows:
+        assert row.model_dump(mode="json") == row.model_dump(mode="python"), row

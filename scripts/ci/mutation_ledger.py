@@ -10,12 +10,17 @@ function changed (`create_mutants_for_file`). The lane checkpoints the files
 during the run and restores them the next night.
 
     mutation_ledger.py pack ARCHIVE      tar.gz every mutants/**/*.meta
-    mutation_ledger.py unpack ARCHIVE    restore them, keeping only killed results
+    mutation_ledger.py unpack ARCHIVE    restore them, keeping killed, survived and timeout
     mutation_ledger.py select            stdin: mutmut patterns; stdout: those to run
 
-Only a `killed` result is carried. A survivor, timeout, suspicious or untested
-mutant is measured again every night, because a test merged since may kill it
-and the restored meta carries no record of which tests ran.
+A `killed`, `survived` or `timeout` result is carried; every other status
+(suspicious, segfault, interrupted, skipped, no tests, caught by type check) is
+measured again, being cheap or untrustworthy. Survivors were measured again every
+night before 2026-11-17: one costs the whole test suite, and that night re-measuring
+the 1479 carried from the night before took about an hour of the 210-min budget,
+a share that grows with every night, so the range could never complete. The price:
+a survivor that a test merged since would kill stays reported until its function
+changes (mutmut then resets the function's results by hash).
 
 `select` needs the shadow tree generated first (`mutation_legacy.py generate`).
 All commands run from the repo root.
@@ -39,6 +44,7 @@ MUTANTS = Path("mutants")
 META_SUFFIX = ".meta"
 MUTANT_INFIX = "__mutmut_"
 REQUIRED_KEYS = ("exit_code_by_key", "durations_by_key", "estimated_durations_by_key")
+CARRIED = frozenset({"killed", "survived", "timeout"})
 
 
 @dataclass
@@ -77,13 +83,13 @@ def _is_meta_member(member: tarfile.TarInfo) -> bool:
 
 
 def _carried(exit_codes: dict[str, int | None]) -> tuple[dict[str, int | None], int]:
-    """Keep killed results; every other one becomes None (not measured)."""
+    """Keep the CARRIED statuses; every other result becomes None (not measured)."""
     carried: dict[str, int | None] = {}
     reset = 0
     for key, code in exit_codes.items():
-        killed = code is not None and status_by_exit_code[code] == "killed"
-        carried[key] = code if killed else None
-        reset += code is not None and not killed
+        kept = code is not None and status_by_exit_code[code] in CARRIED
+        carried[key] = code if kept else None
+        reset += code is not None and not kept
     return carried, reset
 
 
@@ -114,7 +120,7 @@ def _restore_one(path: Path, tally: Restored) -> None:
 
 
 def unpack(archive: Path) -> Restored:
-    """Extract only mutants/**/*.meta (data filter, CVE-2007-4559), then carry killed results."""
+    """Extract only mutants/**/*.meta (data filter, CVE-2007-4559), then keep CARRIED results."""
     root = Path.cwd()
     with tarfile.open(archive, "r:gz") as tar:
         members = [m for m in tar.getmembers() if _is_meta_member(m)]
@@ -229,7 +235,8 @@ def main(argv: list[str]) -> int:
             print(f"ledger: unreadable archive {args.archive}: {exc}", file=sys.stderr)
             return 1
         print(
-            f"ledger: restored {t.files} meta file(s): {t.kept} killed result(s) kept, "
+            f"ledger: restored {t.files} meta file(s): "
+            f"{t.kept} killed/survived/timeout result(s) kept, "
             f"{t.reset} other result(s) to measure again, {t.dropped} unreadable file(s) dropped"
         )
         return 0

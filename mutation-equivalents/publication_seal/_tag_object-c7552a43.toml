@@ -1,0 +1,13 @@
+[[equivalent]]
+file = "src/lovspor/publication_seal.py"
+symbol = "_tag_object"
+registered = "2026-11-22, from register key 43865af5b9b4f4a3 (GREEN under scripts/ci/mutant_check.py try with the PR #1009 tests)"
+mutation = '''
+-    lines = header.decode("utf-8", errors="replace").split("\n")
++    lines = header.decode(errors="replace").split("\n")
+'''
+justification = """
+`bytes.decode()` without an encoding uses UTF-8 (the documented default,
+independent of the locale), so dropping the explicit `"utf-8"` while keeping
+`errors="replace"` decodes every input to the same text.
+"""

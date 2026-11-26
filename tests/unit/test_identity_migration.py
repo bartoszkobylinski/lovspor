@@ -17,7 +17,7 @@ from lovspor.cli import app
 from lovspor.errors import IdentityMigrationError
 from lovspor.identity.apply import apply_plan
 from lovspor.identity.plan import plan_migration
-from lovspor.identity.report import SUMS_FILENAME, write_report
+from lovspor.identity.report import SUMS_FILENAME, report_data, write_report
 from tests.unit.identity_git_fixtures import (
     commit_all,
     doc_text,
@@ -193,6 +193,93 @@ def test_the_report_names_its_base_and_checksums(
     sums_file = (tmp_path / SUMS_FILENAME).read_text(encoding="utf-8")
     assert f"{sums['report.md']}  report.md\n" in sums_file
     assert "x-2026" in (tmp_path / "report.md").read_text(encoding="utf-8")
+
+
+_PLAN_COUNTS = (
+    "manifest_revisions",
+    "base_documents",
+    "planned_documents",
+    "restored_tombstones",
+    "detached_tombstone_paths",
+    "history_files",
+    "history_files_without_manifest_record",
+    "orphan_history_doc_ids",
+    "orphan_history_doc_ids_not_restored",
+    "history_owner_mismatches",
+    "unrecoverable_doc_ids",
+    "changed_paths",
+    "registry_entries",
+    "registry_conflicts",
+    "threshold_exceptions",
+    "reused_slugs",
+    "reused_slugs_pre_threshold",
+    "reused_slugs_post_threshold",
+    "u1_renames",
+    "u1_renames_with_doc_id_suffix",
+    "restored_tombstone_collisions",
+)
+
+
+def _plan_counts(repo: Path, threshold: str | None = None) -> dict[str, object]:
+    counts = report_data(plan_migration(repo, "HEAD", threshold))["counts"]
+    assert isinstance(counts, dict)
+    return {name: counts[name] for name in _PLAN_COUNTS}
+
+
+def test_the_report_counts_the_plan_under_its_published_names(
+    base: tuple[Path, dict[str, str]],
+) -> None:
+    """``report.json`` ``counts`` is read by name: each key holds its own tally."""
+    repo, shas = base
+
+    assert _plan_counts(repo) == {
+        "manifest_revisions": 4,
+        "base_documents": 2,  # KEEP and NEW
+        "planned_documents": 4,  # plus the restored OLD and LOST
+        "restored_tombstones": 2,
+        "detached_tombstone_paths": 0,
+        "history_files": 3,
+        "history_files_without_manifest_record": 1,  # d.json, naming LOST
+        "orphan_history_doc_ids": 1,
+        "orphan_history_doc_ids_not_restored": 0,
+        "history_owner_mismatches": 1,  # x.json names NEW, OLD owns x
+        "unrecoverable_doc_ids": 0,
+        "changed_paths": 11,
+        "registry_entries": 4,  # c, d, x and x-2026
+        "registry_conflicts": 0,
+        "threshold_exceptions": 0,
+        "reused_slugs": 1,
+        "reused_slugs_pre_threshold": 0,
+        "reused_slugs_post_threshold": 1,
+        "u1_renames": 1,
+        "u1_renames_with_doc_id_suffix": 0,  # x-2026 is free
+        "restored_tombstone_collisions": 1,
+    }
+    at_r4 = _plan_counts(repo, shas["r4"])
+    assert (at_r4["reused_slugs_pre_threshold"], at_r4["reused_slugs_post_threshold"]) == (1, 0)
+    assert (at_r4["u1_renames"], at_r4["threshold_exceptions"]) == (0, 1)
+
+
+def test_a_rename_that_falls_back_to_the_doc_id_is_counted(
+    base: tuple[Path, dict[str, str]],
+) -> None:
+    repo, _ = base
+    year, day = "sf-20240101-0005", "sf-20240101-0006"
+    for slug, doc_id in (("x-2026", year), ("x-2026-06-01", day)):
+        write_doc(repo, f"forskrifter/{slug}.md", doc_text(doc_id, slug, "body"))
+        _history(repo, slug, doc_id)
+    documents = {
+        KEEP: record(KEEP, "c"),
+        NEW: record(NEW, "x"),
+        year: record(year, "x-2026"),
+        day: record(day, "x-2026-06-01"),
+    }
+    write_manifest_json(repo, documents, "2026-10-11T00:00:00Z")
+    commit_all(repo, "add(forskrift): x-2026, x-2026-06-01")
+
+    counts = _plan_counts(repo)
+
+    assert (counts["u1_renames"], counts["u1_renames_with_doc_id_suffix"]) == (1, 1)
 
 
 def test_a_repaired_corpus_has_nothing_to_do(base: tuple[Path, dict[str, str]]) -> None:

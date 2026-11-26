@@ -70,6 +70,7 @@ Draft PR (opened as draft, every push)
 
 Marked "Ready for review" (or opened ready) — the author runs ONCE
   ├─ fast-ci, Test, mutation (as above)
+  ├─ diff-scope     (ubuntu: is every changed file under tests/? then no author round, #986)
   ├─ codex-author   (self-hosted `codex-lovspor` runner on the Mac mini: independent test author ONLY)
   │     └─ hands its work to the verdict lane as artifact `agent-tests-<head-sha>`
   ├─ codex-tests    (ubuntu: applies that patch, lints, runs the suite, verdict, push)
@@ -121,6 +122,17 @@ existed at `BEFORE_SHA` was deleted or renamed away. Rename detection is deliber
 off: moving a human test out from under the name its failures are reported by loses
 the same coverage as deleting it.
 
+It also fails the job, on every lane, when a **preservation contract** was added,
+modified or deleted: the snapshots, goldens and gate modules named in the script's
+`PROTECTED_PATTERNS` (served MCP call snapshot and tool-surface anchor, rendering and
+page goldens, the forarbeider corpus golden, the site route map, the guard's own tests, and the future
+`tests/fixtures/add_only/` goldens). They sit inside the `tests/` allowlist but freeze a
+served surface on purpose (#958; owner decision: goldens are never
+auto-regenerated or silently updated), so a change to one is an owner-reviewed PR. New
+coverage for a pinned surface goes in a new sibling module. Every entry is also a
+`.github/CODEOWNERS` line, and `tests/unit/test_agentic_ci_scripts.py` keeps the two
+lists in step.
+
 The allowlist depends on the lane (issue #596). The PR test lanes (`codex-author`,
 `codex-tests`) may change `tests/**/*.py` and files under a `fixtures/` directory. The
 remediation lanes (`remediate`, `remediate-verify`, `assert_codex_scope.sh <sha>
@@ -166,8 +178,12 @@ property of the suite and not the diff, and "0 survivors" pushed equivalent muta
   15 min during the run and once after it: a branch, because a runner shutdown skips every
   later step, `always()` ones included. The next night restores the ledger for the same base
   (`MUTMUT_PR_RESUME_ARCHIVE`), and `mutmut-pr.sh` narrows its patterns to the mutants without
-  a result. Only `killed` results carry over: survivors, timeouts, suspicious and untested
-  mutants are measured again every night, because a test merged since may kill them. The
+  a result. `killed`, `survived` and `timeout` results carry over; suspicious, segfault,
+  interrupted, skipped, untested and type-check results are measured again. Survivors used to
+  be measured again every night too (#943), but each one runs the whole suite: on 2026-11-17
+  re-measuring 1479 of them took about an hour of the budget, a share growing every night, so
+  the range could never complete. The price: a survivor that a test merged since would kill
+  stays in the report until its function changes, which resets the function's results. The
   report's counts are over every carried result plus the night's own. A completed range moves
   the tag and deletes the branch.
 - **Trigger.** `workflow_dispatch` only, fired at 00:30 Europe/Oslo by a launchd agent on the
@@ -180,6 +196,43 @@ property of the suite and not the diff, and "0 survivors" pushed equivalent muta
   established, so the step samples `free -m` and `df -h` every 5 min. Handed over as
   `MUTMUT_PR_TOTAL_BUDGET_SECONDS`, which replaces the setup + per-file sum. The job's
   `timeout-minutes: 345` is strictly above the cap and under the hosted 360-min kill.
+- **Memory guard (#971, #978, #983).** mutmut bounds a mutant's CPU and wall time, never its memory.
+  On 2026-11-20 nine mutants of `regjeringen_fetch/normalize.py` that keep a parser loop from
+  advancing each ran 11–19 min, the wall limit `(estimate + 7) * 15`, appending on every pass;
+  the 16 GiB runner was shut down at 14.5 GiB, 58 min before the budget, and no report was
+  written. `scripts/ci/mutant_memory_guard.py` runs beside `mutmut run` and reads `/proc`
+  every 2 s for the processes mutmut forked to test a mutant. One that holds 2048 MiB more
+  than the process that forked it (resident plus swapped) is sent SIGXCPU, the signal of
+  mutmut's own timeout, so it is recorded as a `timeout`, the verdict it had before, and
+  carried in the ledger like any other. The allowance is a judgement between two measured
+  figures: the whole machine stayed under 3.6 GiB while healthy mutants ran, and four children
+  at the allowance stay under 12 GiB. A mutant process is recognised by the title mutmut gives
+  its fork (`mutmut: <mutant name>`) or, without one, as a fork of `mutmut run` under a
+  CPU-time limit: a process that still carries its parent's command line, where that line is
+  `python .../mutmut run ...`, and whose `/proc/<pid>/limits` names a limit. The second rule
+  exists because the first one failed on the hosted runner: in run 44780986245 the guard saw
+  no titled process in three hours while memory reached 15.4 of 16 GiB (#978), and in run
+  44837229442 all 1300 processes it saw were untitled (why the title is missing there is not
+  established). The CPU limit is what separates a mutant from mutmut's other forks: mutmut
+  sets one in every fork that tests a mutant (`workers/isolation.py:865` in 3.8.0), while the
+  pool that generates the mutants is four forks of `mutmut run` with the same command line
+  and no limit. Run 44837229442 counted those four as mutants, announced "mutant processes
+  are visible" 47 min before the first mutant ran, and reported a pool worker's 524 MiB as
+  the largest mutant (#983). A fork without a CPU limit is counted apart and never stopped: a
+  pool that loses a worker waits for its result until the budget is spent. Limits that cannot
+  be read count as a limit. When more than 64 forks have run without one, more than any pool
+  has, the limit is not telling mutants apart on that machine, and from then on every fork is
+  treated as a mutant. An untitled mutant is named by its pid; mutmut's own records name the
+  mutant that timed out. The guard writes to the step log, never to `mutation-raw.log`: a
+  line when it starts, one when it first sees a mutant process, one when it first sees a fork
+  without a CPU limit, one every 15 min with what its scans have seen (titled, untitled, over
+  the allowance, the largest, and the forks it left alone), and one for each process it
+  stops. A night whose 15-minute lines report no mutant process ran unguarded. That the
+  limit rule holds on the hosted runner is read from the first night's lines, not assumed:
+  the mutant count has to rise once "Running mutation testing" starts. A mutant stopped this
+  way was not killed by a test;
+  it stays in the report's timeout list. Whether memory is what ended the 2026-11-13/14 runs
+  is still not established.
 - **Verdict.** `scripts/ci/nightly_mutation_verdict.py` buckets the gate reason that
   `mutation_to_json.py` computed: `clean` (ok, not_applicable, equivalent_mutants_only),
   `survivors` (surviving/timeout/suspicious/uncovered mutants), `partial` (run_incomplete,
@@ -192,8 +245,76 @@ property of the suite and not the diff, and "0 survivors" pushed equivalent muta
   measures the same range again, starting from the ledger.
 - **Report.** One open issue titled `Nightly mutation`, label `mutation-nightly` (created if
   missing), body rewritten every night: verdict, range and where its base came from,
-  whether the tag moved, the run link, and `mutation_gate.py --summary` (counts, survivors,
-  timed-out and suspicious mutants). GitHub mails on create, not on edit.
+  whether the tag moved, the run link, `mutation_gate.py --summary` (counts, survivors,
+  timed-out and suspicious mutants), and the register over all nights (below). Each night
+  also gets one comment with its counts and a link to its report: GitHub mails a comment and
+  does not mail an edit, and the comments are the nights in order (owner decision
+  2026-11-21, #984).
+- **What is kept (#984).** A night used to live in a 90-day run artifact and in the issue
+  body until the next night rewrote it: after two completed nights 2 795 mutants were on
+  record as alive and nothing held the list. The step "Keep the night" commits it to the
+  `mutation-reports` branch through `scripts/ci/mutation_reports.sh`, one commit a night on
+  top of the last, never forced; a push that loses a race merges the night again onto the
+  branch as it then stands. `scripts/ci/mutation_register.py` writes the files.
+  `register.jsonl` is every mutant known to be alive, one JSON object per line: file,
+  function, status, kind, the diff, the head it was first seen at and last measured at.
+  `history.jsonl` has one line per night, failed nights included. `nights/<date>-<head>/`
+  has the night's `report.md` (by kind, by file, the functions with mutants left alive, the
+  slowest mutants, every mutant not killed with its changed lines, the register after the
+  night) and its `night.json`. **The register is a record of measurements.** A function
+  measured that night has its entries replaced by the night's result, so a mutant a test now
+  kills leaves and a new survivor arrives; a function not measured keeps its entries; a
+  function no longer in the tree takes its entries with it. Only a completed night changes
+  it, the tag's rule: a partial night has measured part of a function. An entry is
+  identified by its file, its function and the changed lines of the mutation, the rule of
+  `mutation-equivalents/`, never by mutmut's id, which renumbers. Registered equivalents
+  are not listed. The step cannot fail the night; without it the night is in the artifact,
+  the section is left out of the issue body and the night's comment says the branch was not
+  written. A night merged from its artifact outside the lane says so in the `written_by` of
+  its history line (`seed: ...`).
+- **Claimed kills (#984).** A survivor is killed by a test, and a test changes nothing in
+  `src/`: the range alone never measures its function again, so the register would keep
+  the mutant as alive until the function itself changed. A commit that kills registered
+  mutants names them in its message, one line a mutant or several keys on a line:
+  `Kills-mutant: <key>`, the `key` of the entry in `register.jsonl`. Before it measures,
+  the lane reads those lines over its range (`scripts/ci/mutation_remeasure.py`), looks the
+  keys up in the register and hands the functions to `mutmut-pr.sh`
+  (`MUTMUT_PR_REMEASURE_FILE`), which measures all their mutants again beside the diff's,
+  also when the range changed nothing in `src/` and also over a result the ledger carried.
+  **The claim decides nothing.** The register changes by that night's measurement alone,
+  and the night's report says of each claimed key whether it was found killed or still
+  alive. A key the register does not hold, or one whose function is no longer in the tree,
+  is reported and not measured. A commit without the line is not looked at: its kills stay
+  in the register as alive until the function is measured for another reason.
+- **Working the register down (#984).** A session kills survivors on request, by the
+  procedure in `.claude/skills/mutant-killing/SKILL.md`: it reads the register with
+  `scripts/ci/mutant_check.py` (`list`, `show`), writes tests, and may try them against one
+  registered mutant with `mutant_check.py try <key> -- <pytest arguments>`. That command
+  runs the tests on the tree as it is, where they must pass, then against a temporary copy
+  of `src/` that holds the registered change, where they must fail; the working tree is
+  not touched and mutmut does not run. It is an aid and not a measurement: mutmut chooses
+  the tests and the timeout of a mutant, this runs the tests it is given. So the session
+  records nothing as killed and never writes to `mutation-reports`; it names the keys in
+  its commit (above) and the night decides.
+- **Every mutant (#984).** The result above names survivors only: no kind for any mutant,
+  no time, and a killed mutant not at all, although mutmut wrote all of it down and the
+  runner threw it away with the job. `scripts/ci/mutation_night.py` reads `mutants/**/*.meta`
+  (verdict, duration, the estimate of the tests) and the shadow tree through mutmut's line
+  index (`*.spans`) while they are on disk, and adds two files to the artifact.
+  `mutation-mutants.jsonl.gz` has one line per measured mutant: id, file, symbol, status,
+  exit code, kind, the tokens removed and added, seconds, estimate. `mutation-night.json`
+  has the night in sums: by status, by kind, by file, by function with the number of tests
+  mutmut charged to it, the 50 slowest, and where its counts differ from
+  `mutation-result.json`. The sums by kind and the files with most mutants left alive also
+  go to the job summary. The status is mutmut's own word for the exit code. **The kind is
+  not mutmut's**: mutmut 3 records no operator, so `scripts/ci/mutation_kinds.py` reads it
+  off the tokens of the mutant and of its original and names it after the operator of
+  mutmut 3.8.0 that makes such a change (`argument: replaced by None`, `string: XX added`,
+  `operator: comparison`, ...). It is written as `kind`, never as `operator`, and a change
+  that fits no rule is `other`. Checked against the 74 662 mutants of a shadow tree
+  generated on 2026-11-12: none was `other`, in 14 s. The step gives no verdict and cannot
+  fail the night; what it could not read is listed under `problems`. The files live as long
+  as the artifact, 90 days: a lasting register and history are the next step of #984.
 - **Run status.** After the report, a night whose verdict is not complete (`partial`,
   `budget_exceeded`, `tool_failure`) fails its last step, so the run ends red and GitHub's
   failed-run mail fires; `clean` and `survivors` end green (#879). Before this a non-complete
@@ -235,6 +356,22 @@ does not parse falls back to its whole-module pattern. The whole run has one wal
 mutants, the stats pass and the clean-test pass over the whole unit suite, a cost of the suite
 and not of the diff — plus `MUTMUT_PR_FILE_BUDGET_SECONDS` (default 1200 s) × the number of
 changed files (issue #102), enforced with `timeout(1)`; it is not a per-file budget.
+
+Each mutant also has its own wall limit, mutmut's
+`(estimated_time + timeout_constant) * timeout_multiplier`; past it mutmut ends the mutant's
+test process and records a `timeout`. `estimated_time` is the summed `call` phase of the tests
+that reach the function. `pyproject.toml` sets `timeout_constant = 30.0` and
+`timeout_multiplier = 4.0`. The constant covers what the estimate leaves out: on PR #395 two
+real survivors (0.71 s call, 4.75 s setup and teardown) ran out of the default 25.7 s and
+were reported as timeouts (#423); they now get 122.8 s. The multiplier bounds a mutant that
+never ends, because such a mutant waits out the whole limit. Until 2026-11-20 the pair was 7
+and 15, which gave a function with a 62 s estimate 17 min: 20 timeouts were 17 % of all
+measured worker time, and the runner's memory reached 15.4 of 16 GiB under them (#975, #978).
+The same function now gets 368 s. The margin is measured: of 12 084 mutants with an estimate
+of 5 s or more that reached a verdict, 99.9 % took at most 3.01 times their estimate.
+Replayed over 26 198 measured results the new pair changes one, a kill after 826 s on a 59 s
+estimate, which would be a timeout. A timeout is never counted as a kill, so a limit that is
+too short shows in the report's timeout list and not as a better score.
 
 A changed function with a `function-lines` entry in `scripts/quality/ratchet-baseline.toml`
 is a large legacy function (issue #228, owner decision 2026-09-30): only the mutants on its
@@ -318,6 +455,20 @@ unchanged.
   group per commit.
 - The test author runs once per PR: on `ready_for_review`, or on `opened` when the PR is not a
   draft. `synchronize` and `reopened` skip it, and `ready` accepts the skipped round.
+- **A pull request made only of tests gets no author round** (owner decision 2026-11-21,
+  #986). The author writes tests for the code a PR changes; a tests-only PR holds none, and
+  its round still cost a session of the agent's quota and a place in the runner's queue.
+  Survivors of the nightly lane are killed in exactly such PRs. The hosted job `diff-scope`
+  runs on the author's events, reads the PR's file list from the API and hands it to
+  `scripts/ci/pr_diff_scope.py`; `codex-author` needs that job and is skipped only on the
+  answer `tests_only=true`. `codex-tests` skips with the author and `ready` accepts that, as
+  it does for a later push. The answer comes from the diff, never from a label, which would
+  let any PR excuse itself. Doubt runs the author: no file listed, fewer files listed than
+  the PR reports (the API lists 3000 at most), a renamed file whose earlier name is outside
+  `tests/`, a helper missing from the head, or `diff-scope` failing (`!cancelled()` on the
+  author is what lets it judge a failed need). READY on such a PR claims fast-ci and the
+  Test matrix, and no independent round. A docs-only PR and a `mutation-equivalents/` entry
+  still get the round.
 - **One Codex run at a time is the runner's job, not a concurrency group's.** There is one
   `codex`-labelled runner and one Codex subscription behind it, and GitHub queues jobs for a
   busy runner in a real FIFO. `codex-author` and `remediate` therefore declare no shared group;

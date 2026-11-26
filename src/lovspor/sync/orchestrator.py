@@ -44,7 +44,7 @@ import logging
 import re
 from collections import Counter
 from collections.abc import Collection, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from functools import partial
 from itertools import islice
@@ -53,7 +53,7 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.embeddings.cache import quantized_document_vectors, sync_embedder
+from lovspor.embeddings.cache import sync_embedder
 from lovspor.embeddings.inputs import (
     build_embedding_inputs,
     hash_embedding_inputs,
@@ -64,7 +64,7 @@ from lovspor.embeddings.model import (
 )
 from lovspor.embeddings.provider import UNKNOWN_SPACE_ID, create_embedder, space_id_of
 from lovspor.embeddings.sections import strip_frontmatter
-from lovspor.embeddings.store import read_embeddings, write_embeddings
+from lovspor.embeddings.store import read_embeddings, sidecar_sha256, write_embeddings
 from lovspor.errors import (
     ConfigError,
     CorpusStateError,
@@ -75,7 +75,7 @@ from lovspor.errors import (
 from lovspor.extraction.tarball import iter_tarball_xml
 from lovspor.history import HistoryRecord, extract_lineage
 from lovspor.identity import registered_ownership, replace_manifest, verified_corpus_identity
-from lovspor.identity.history import FILES_PER_HISTORY, write_document_history
+from lovspor.identity.history import preserve_displaced, write_document_history
 from lovspor.parsing.placeholder import is_content_placeholder
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.rendering.document import (
@@ -96,6 +96,15 @@ from lovspor.sync.change_detector import (
     force_rerender_changeset,
     stale_render_changeset,
 )
+from lovspor.sync.delta_embed import (
+    PriorVectors,
+    document_vectors,
+    embedding_target,
+    grant_headroom,
+    paid_tokens,
+    prior_for,
+    reusing,
+)
 from lovspor.sync.document_io import (
     dataset_dir,
     delete_document,
@@ -105,6 +114,7 @@ from lovspor.sync.document_io import (
     write_derived_views,
     write_document,
 )
+from lovspor.sync.document_io import embeddings_path as _embeddings_path
 from lovspor.sync.git_commit import add as git_add
 from lovspor.sync.git_commit import commit as git_commit_msg
 from lovspor.sync.git_commit import (
@@ -141,7 +151,6 @@ _TRACKED_DATASETS = (
     "gjeldende-sentrale-forskrifter",
 )
 _MANIFEST_FILENAME = "manifest.json"
-_EMBEDDINGS_SUBDIR = "embeddings"
 """Per-dataset directory holding ``<slug>.bin`` embedding files.
 
 Lives under each ``<dataset>/`` so the existing INDEX, history, and
@@ -179,6 +188,7 @@ class _UpstreamDoc:
     title: str
     eu_basis: tuple[str, ...]
     retrieved_at: datetime | None = None
+    prior_vectors: PriorVectors | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -324,7 +334,7 @@ def run_sync(  # noqa: PLR0912, PLR0915
     now = datetime.now(UTC)
     if embedder is not None:
         plan = _ChangePlan(changes.new, changes.changed, renamed, upstream, prior, now)
-        _guard_change_reembed(settings, plan, allow=allow_mass_reembed)
+        upstream = _guard_change_reembed(settings, plan, embedder, allow=allow_mass_reembed)
     _guard_mass_removal(changes.removed, prior, settings.max_removal_ratio)
 
     if embedder is not None and _needs_sprint9_embeddings_migration(
@@ -798,29 +808,11 @@ def _prior_slug_ownership(prior: Manifest | None) -> dict[str, dict[str, str]]:
 
 
 def _with_slug(doc: _UpstreamDoc, slug: str) -> _UpstreamDoc:
-    return _UpstreamDoc(
-        doc_id=doc.doc_id,
-        source_dataset=doc.source_dataset,
-        xml_bytes=doc.xml_bytes,
-        xml_hash=doc.xml_hash,
-        slug=slug,
-        title=doc.title,
-        eu_basis=doc.eu_basis,
-        retrieved_at=doc.retrieved_at,
-    )
+    return replace(doc, slug=slug)
 
 
 def _with_retrieved_at(doc: _UpstreamDoc, retrieved_at: datetime) -> _UpstreamDoc:
-    return _UpstreamDoc(
-        doc_id=doc.doc_id,
-        source_dataset=doc.source_dataset,
-        xml_bytes=doc.xml_bytes,
-        xml_hash=doc.xml_hash,
-        slug=doc.slug,
-        title=doc.title,
-        eu_basis=doc.eu_basis,
-        retrieved_at=retrieved_at,
-    )
+    return replace(doc, retrieved_at=retrieved_at)
 
 
 def _frontmatter_context(upstream: _UpstreamDoc, now: datetime) -> FrontmatterContext:
@@ -1005,7 +997,6 @@ def _write_one(
         upstream.source_dataset,
         upstream.slug,
     )
-    doc_type = doc_type_for_dataset(upstream.source_dataset)
     rendered = render_full_document(upstream.xml_bytes, _frontmatter_context(upstream, now))
     write_document(path, rendered)
 
@@ -1019,14 +1010,14 @@ def _write_one(
             upstream.source_dataset,
             upstream.slug,
             rendered,
-            embedder,
+            reusing(embedder, upstream.prior_vectors),
             lspe_version=settings.lspe_writer_version,
         )
         written_paths.append(embed_path)
         descriptor, space_id = _embedder_identity(embedder)
 
     record = ManifestRecord(
-        doc_type=doc_type,
+        doc_type=doc_type_for_dataset(upstream.source_dataset),
         xml_hash=upstream.xml_hash,
         markdown_path=str(path.relative_to(settings.lovverk_repo_path)),
         source_dataset=upstream.source_dataset,
@@ -1058,6 +1049,7 @@ def _write_one(
         # recomputed, so it cannot drift from the embedded payload. Keyless:
         # None, same honesty rule as the space fields above.
         embedding_input_hash=input_hash,
+        embedding_sidecar_sha256=space_id and sidecar_sha256(written_paths[-1]),
         # Stamp the renderer that produced this Markdown, so a later renderer
         # bump makes the doc detectably stale even though its XML is unchanged.
         renderer_version=RENDERER_VERSION,
@@ -1125,11 +1117,6 @@ def _embedder_identity(embedder: EmbeddingModel) -> tuple[str | None, str | None
     return descriptor, space_id
 
 
-def _embeddings_path(corpus_root: Path, dataset: str, slug: str) -> Path:
-    """Resolve the on-disk ``.bin`` path for a doc's embeddings."""
-    return dataset_dir(corpus_root, dataset) / _EMBEDDINGS_SUBDIR / f"{slug}.bin"
-
-
 def _write_embeddings_for_doc(
     corpus_root: Path,
     dataset: str,
@@ -1189,7 +1176,7 @@ def _write_embeddings_for_doc(
     if not inputs:
         write_embeddings(path, [], scale=1.0, dim=dim, embedding_space_id=header_esi)
         return path, input_hash
-    quantized, scale = quantized_document_vectors(embedder, inputs, input_hash)
+    quantized, scale = document_vectors(embedder, inputs, input_hash)
     pairs = [(inputs[i].section_id, quantized[i]) for i in range(len(inputs))]
     write_embeddings(path, pairs, scale, dim=dim, embedding_space_id=header_esi)
     return path, input_hash
@@ -1306,7 +1293,7 @@ def _tombstone(old: ManifestRecord, reason: str | None = None) -> ManifestRecord
     Keeps ``doc_type``, ``xml_hash``, ``markdown_path``, ``source_dataset``, ``last_seen``,
     ``slug``, ``title``. Drops to ``None`` ``total_changes``, ``last_changed``, ``eu_basis``,
     ``embedding_hash``, ``embedding_space``, ``embedding_space_id``, ``embedding_input_hash``,
-    ``renderer_version``: the removal's audit trail is ``history/<slug>.json``.
+    ``embedding_sidecar_sha256``, ``renderer_version``: the audit trail is ``history/<slug>.json``.
 
     ``reason`` is ``None`` for an ordinary removal (the doc left the upstream
     dataset) and set when the corpus withheld a doc upstream still lists — see
@@ -1468,10 +1455,8 @@ def _commit_history_followup(
     replace_manifest(manifest, manifest_path)
     git_add(repo, [manifest_path, *history_paths])
     if has_staged_changes(repo):
-        git_commit_msg(
-            repo,
-            f"sync: update history for {len(history_paths) // FILES_PER_HISTORY} documents",
-        )
+        documents = sum(p.parent.name == "history" and p.suffix == ".json" for p in history_paths)
+        git_commit_msg(repo, f"sync: update history for {documents} documents")
 
 
 def _commit_per_doc_actions_only(
@@ -1526,6 +1511,7 @@ def _generate_and_apply_history(
     """For each target ``doc_id``, extract history from git, write the
     history files (slug and by-id, #871), and return updated records with
     ``total_changes`` / ``last_changed`` populated plus all written paths.
+    A slug's displaced holder is kept first by ``preserve_displaced`` (this run's records).
 
     Tombstones (``status='removed'``) and slug-less records (legacy
     Sprint 3 format) are skipped — see decisions.md §12d for the
@@ -1548,6 +1534,7 @@ def _generate_and_apply_history(
             # overwrite the doc's history files with an empty record.
             continue
         history_target_dir = dataset_dir(repo, record.source_dataset)
+        written_paths.extend(preserve_displaced(repo, history, history_target_dir, updated))
         written_paths.extend(write_document_history(repo, lineage, history, history_target_dir))
         updated[doc_id] = _record_with_history(record, history)
     return updated, written_paths
@@ -1913,24 +1900,33 @@ def _docs_to_embed(settings: Settings, plan: _ChangePlan) -> Iterator[_UpstreamD
             yield doc
 
 
-def _guard_change_reembed(settings: Settings, plan: _ChangePlan, *, allow: bool) -> None:
-    """ADR-0006 §7 on the change path: the whole run's workload, before any spend (#790).
+def _guard_change_reembed(
+    settings: Settings, plan: _ChangePlan, embedder: EmbeddingModel | None = None, *, allow: bool
+) -> dict[str, _UpstreamDoc]:
+    """ADR-0006 §7 on the change path: the whole run's paid workload, before any spend (#790).
 
-    Every document is rendered and its inputs counted with the production
-    tokenizer, the same estimate the backfill guard uses: it is the input
-    the provider is sent, not a bill (a retried request may be billed again).
-    A document that cannot render is skipped by the write loop too.
+    Every document is rendered and its paid inputs counted with the production
+    tokenizer: the inputs the provider is sent, not a bill (a retried request
+    may be billed again). An input whose text the document's verified committed
+    sidecar already embeds is carried, not counted (#919), unless carrying cannot
+    keep the full re-embed's scale: then the whole document counts, and a louder
+    paid row re-pays only within what the ceiling leaves (#936). The map returned
+    feeds the write loops; a document that cannot render is skipped there too.
     """
-    documents = tokens = 0
+    upstream, target, documents, tokens = dict(plan.upstream), embedding_target(embedder), 0, 0
     for doc in _docs_to_embed(settings, plan):
         render = partial(render_full_document, doc.xml_bytes, _frontmatter_context(doc, plan.now))
         prior = plan.prior.documents.get(doc.doc_id)
         rendered = rendered_or_refused(render, doc.doc_id, doc.xml_hash, prior)
         if rendered is None:
             continue
-        documents += 1
-        tokens += sum(count_input_tokens(item.text) for item in build_embedding_inputs(rendered))
+        inputs = build_embedding_inputs(rendered)
+        vectors = prior_for(settings.lovverk_repo_path, prior, target, inputs)
+        upstream[doc.doc_id] = replace(upstream[doc.doc_id], prior_vectors=vectors)
+        documents, tokens = documents + 1, tokens + paid_tokens(inputs, vectors)
     enforce_reembed_guard(change_scope(documents, tokens), plan.prior, settings, allow)
+    grant_headroom(target, None if allow else settings.reembed_guard_max_tokens - tokens)
+    return upstream
 
 
 def _run_sprint9_embeddings_migration(
@@ -1954,7 +1950,6 @@ def _run_sprint9_embeddings_migration(
     write would clobber the ``embedding_hash`` fields).
     """
     repo = settings.lovverk_repo_path
-    manifest_path = repo / _MANIFEST_FILENAME
     selection = _select_embedding_backfill(prior, repo, target_space_id)
     if not selection:
         return prior
@@ -1981,11 +1976,12 @@ def _run_sprint9_embeddings_migration(
                 "embedding_space": descriptor,
                 "embedding_space_id": space_id,
                 "embedding_input_hash": input_hash,
+                "embedding_sidecar_sha256": space_id and sidecar_sha256(new_path),
             },
         )
     new_manifest = Manifest(generated_at=now, documents=new_records)
-    replace_manifest(new_manifest, manifest_path)
-    git_add(repo, [manifest_path, *written])
+    replace_manifest(new_manifest, repo / _MANIFEST_FILENAME)
+    git_add(repo, [repo / _MANIFEST_FILENAME, *written])
     if has_staged_changes(repo):
         git_commit_msg(
             repo,

@@ -48,6 +48,68 @@ override does not make a corpus-wide re-embed fit the sync job: one ran past the
 120-minute `timeout-minutes` twice, and the paid vectors were lost with the
 workspace.
 
+The change path pays only for changed fragments (#919). A vector depends on its
+input text alone, so an input whose text the document's committed sidecar already
+embeds is carried, not sent, and the guard counts only the inputs that are sent.
+Reuse needs proof that the committed rows belong to those texts: the prior record's
+`embedding_hash` equals its `xml_hash`, its `embedding_space_id` is the configured
+space, the committed Markdown re-derives the inputs named by its
+`embedding_input_hash`, the sidecar is LSPE v2 with the same space, dimension and
+section ids in input order, and its quantization provenance is known: its bytes match
+the record's `embedding_sidecar_sha256`, or, for a record without one, they are in the
+audited legacy set (`attested_sidecars.txt`: 3,930 non-empty sidecars at lovverk
+`c310127e`, each paired with its record's `embedding_input_hash`, writer audit
+2026-11-15; 8 sidecars whose bytes predate the 2026-08-04 regeneration are left out).
+`lovspor annotate` clears the stamp of a record it re-annotates. A document that fails any check is paid and counted in
+full, as before. Removed inputs drop out of the rewritten sidecar; the manifest
+records the new full `embedding_input_hash`. The rows are snapshotted from the
+clean committed tree before the first write. The token ceiling is unchanged and
+still fails closed. On 2026-11-14 a one-note amendment to 48 laws counted
+2,797,261 tokens in full; replayed offline against the same corpus head, the paid
+delta is 141,015 tokens (260 of 8,214 inputs), before the #936 re-pays below.
+
+Every sidecar the change path writes is byte-identical to a full re-embed of the
+same inputs (#936). LSPE stores one int8 scale per file and no float vectors, so
+a carried row is reused only while the document's scale provably stays the
+stored one; it is never rounded twice. That holds when (1) every committed row
+reaching ±127 is carried, so the old maximum is still in the document, and (2) no
+paid row needs a larger scale. A document failing (1) is known before any spend
+and is paid and counted in full. A document failing (2) is only known once its
+paid rows are back: it re-pays its carried inputs and is quantized from the
+floats of all its inputs, as a rebuild is. That re-pay is spent from what the
+guard's token ceiling leaves after the counted workload, and refused before it is
+sent if it does not fit (`MassReembedError`, nothing committed); the operator
+override lifts that limit too. So the guard's pre-spend count is a lower bound of
+the run's spend, and the ceiling is still never exceeded. With
+`LOVSPOR_EMBEDDING_CACHE_DIR` set, a cached document entry (only a full re-embed
+writes one) still costs nothing. The change path reads only the runner's local
+copy, even with the R2 remote on (a remote lookup reconciles: it uploads,
+adopts or refuses a conflict), and never stores an entry, so a rerun after a
+crash pays its delta again and a cached rebuild is never served rows a delta
+assembled. The fraction dimension still counts a fully carried document (a
+rename), which is conservative.
+
+Two assumptions carry the byte-equivalence. First, provenance: int8 rows cannot
+prove that their header scale was derived from the original floats, so reuse
+trusts that every committed sidecar was written by the rebuild quantizer, by
+the change path (byte-identical to it) or by the LSPE cutover (which copies
+vectors and scale). A test pins that writer set. At lovverk `c310127e` (the
+last commit before #933 opened), the sidecar history is 1,821 `lovspor-sync[bot]`
+commits plus 22 owner-run migrations (embedding backfills, a regeneration, the
+LSPE v2 cutover, renames and removals), all made by engine paths. The quantizer
+formula has not changed since it was introduced. All 3,938 non-empty sidecars
+have a finite positive scale, a ±127 row and `127 * scale <= 1`, which is
+consistent with that provenance but does not prove it. Second, a vector depends on its text alone, not on the
+request it was batched in.
+
+A run that fails mid-embed commits nothing: each sidecar is staged and renamed,
+so none is ever half-written, and HEAD is unchanged. Files it already wrote stay
+in the corpus worktree, and the next run refuses with `CorpusStateError` until
+the operator inspects `git -C <corpus> status` and, if it is that residue, runs
+`git -C <corpus> reset --hard && git -C <corpus> clean -fd`. The retry then
+writes the same bytes as an uninterrupted run. The scheduled workflow clones the
+corpus fresh, so it never meets residue.
+
 `lovspor annotate-input-identity` is the one-time metadata migration for an
 existing fully-embedded corpus: manifest-only, keyless, idempotent, and
 drift-guarded (corpus HEAD re-verified and every digest recomputed immediately
@@ -197,7 +259,7 @@ It is **self-limiting**. A document whose re-render is byte-identical is skipped
 
 Two things to know before running it:
 
-- **Cost.** Embeddings are computed inside `_write_one`, so every document that *does* change is re-embedded. Budget accordingly, or run without `OPENAI_API_KEY` and let the Sprint 9 backfill re-embed on the next keyed sync.
+- **Cost.** Embeddings are computed inside `_write_one`, so every document that *does* change is re-embedded; inputs whose text the committed sidecar already embeds are carried, not paid (#919). Budget accordingly, or run without `OPENAI_API_KEY` and let the Sprint 9 backfill re-embed on the next keyed sync.
 - **Commit volume.** The re-rendered documents land in one bulk `migration: re-render …` commit followed by the manifest/index/history commit; use `LOVSPOR_GIT_COMMIT_MODE=single` to keep any accompanying real changes to one commit too.
 
 It is a CLI flag and a `run_sync` parameter, never a `Settings`/env field — a stray environment variable must not be able to rewrite the whole corpus from the scheduled workflow.
@@ -2620,6 +2682,8 @@ The workflow:
    removed, syncs keep working but embeddings stop updating until
    the next keyed run triggers the backfill migration.)
 6. Pushes corpus changes only if HEAD is ahead of `origin/main`.
+
+A separate `seal` job then signs the published head as an SSH-signed tag, and a run can be required to start from a sealed head: see [`publication-seal.md`](publication-seal.md).
 
 Concurrency is set to a single `sync` group: a second invocation queues until the active one finishes, never races.
 

@@ -1,0 +1,15 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_parse_tag"
+registered = "2026-11-22, from register key 681819ca7614e49e (GREEN under scripts/ci/mutant_check.py try with the PR #1002 tests)"
+mutation = """
+-            return None, max(after_space, opening + 1)
++            return None, max(after_space, opening + 2)
+"""
+justification = """
+`_parse_tag` only gets here after `raw[opening + 1]` was checked to be a
+letter, and letters are in `_TAG_NAME`, so `end = _skip(raw, opening + 1,
+_TAG_NAME) >= opening + 2` and `after_space = _skip(raw, end, ...) >= end`.
+Hence `max(after_space, opening + 2) == after_space == max(after_space,
+opening + 1)` for every input.
+"""

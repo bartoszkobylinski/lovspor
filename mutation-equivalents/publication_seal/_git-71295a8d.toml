@@ -1,0 +1,14 @@
+[[equivalent]]
+file = "src/lovspor/publication_seal.py"
+symbol = "_git"
+registered = "2026-11-22, from register key 5f75cb7875e29272 (GREEN under scripts/ci/mutant_check.py try with the PR #1010 tests)"
+mutation = '''
+-            check=False,
++            check=None,
+'''
+justification = """
+`subprocess.run` tests `check` for truth (`if check and retcode:` in
+subprocess.py) and never compares it to False, so None and False take the
+same path: return the CompletedProcess, never raise. `check` is spelled out
+only because ruff PLW1510 demands it.
+"""

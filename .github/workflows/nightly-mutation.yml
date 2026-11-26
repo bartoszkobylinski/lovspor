@@ -118,6 +118,39 @@ jobs:
             echo "state=none for this base: the range is measured from the start" >> "$GITHUB_OUTPUT"
           fi
 
+      # A survivor is killed by a test, and a test changes nothing in `src/`,
+      # so the range alone never measures its function again (#984). A commit
+      # that kills registered mutants names their keys (`Kills-mutant: <key>`);
+      # this finds those keys in the range and hands their functions to the
+      # measuring step. The claim decides nothing: the night measures. Without
+      # this step the night measures the diff alone, as before. The `[ -x ]`
+      # guards are the repo rule (#381).
+      - name: Find the registered survivors a commit claims to kill
+        id: claims
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+          HEAD: ${{ steps.range.outputs.head }}
+        run: |
+          patterns="$RUNNER_TEMP/remeasure-patterns.txt"
+          if [ -x scripts/ci/mutation_reports.sh ] && [ -x scripts/ci/mutation_remeasure.py ]; then
+            if scripts/ci/mutation_reports.sh register "$RUNNER_TEMP/register.jsonl" \
+              && .venv/bin/python scripts/ci/mutation_remeasure.py \
+                --base "$BASE" --head "$HEAD" \
+                --register "$RUNNER_TEMP/register.jsonl" \
+                --out-patterns "$patterns" \
+                --out-claims "$RUNNER_TEMP/mutation-claims.json"; then
+              cp "$RUNNER_TEMP/mutation-claims.json" mutation-claims.json
+            else
+              rm -f "$patterns"
+              echo "::warning::the claimed kills of this range were not read; the night measures the diff alone (#984)"
+            fi
+          else
+            echo "::warning::mutation_reports.sh or mutation_remeasure.py is not on this head; the night measures the diff alone (#984)"
+          fi
+          if [ -s "$patterns" ]; then
+            echo "patterns=$patterns" >> "$GITHUB_OUTPUT"
+          fi
+
       # One wall-clock budget for the whole run (the wrapper's model, spec
       # §6a): a fixed 210 min, whatever the start time. The job runs on a hosted
       # runner, so no morning deadline protects anything here. 210, not 300:
@@ -132,21 +165,36 @@ jobs:
           echo "seconds=$cap" >> "$GITHUB_OUTPUT"
           echo "budget: ${cap}s wall clock, independent of the start time"
 
-      # Two background loops beside mutmut (#943): a ledger checkpoint every
-      # 15 min, so a runner shutdown keeps what was measured, and a memory and
-      # disk sample every 5 min, because the cause of the 2026-11-13/14
-      # shutdowns is not established. Neither writes to mutation-raw.log.
+      # Three background loops beside mutmut. A ledger checkpoint every 15 min,
+      # so a runner shutdown keeps what was measured (#943). A memory and disk
+      # sample every 5 min, because the cause of the 2026-11-13/14 shutdowns
+      # is not established. And the memory guard (#971): mutmut bounds a
+      # mutant's time, not its memory, and on 2026-11-20 mutants that loop and
+      # append ran 17 min each until the 16 GiB runner was shut down at
+      # 14.5 GiB. The guard stops a mutant process holding 2048 MiB more than
+      # mutmut itself, with the signal of mutmut's own timeout, so it is
+      # recorded as one. Healthy runs stayed under 3.6 GiB for the whole
+      # machine; four children at the allowance stay under 12 GiB. None of
+      # the three writes to mutation-raw.log.
       - name: Nightly-scoped mutation testing (no LLM)
         id: mut
         env:
           MUTMUT_PR_TOTAL_BUDGET_SECONDS: ${{ steps.budget.outputs.seconds }}
           MUTMUT_PR_RESUME_ARCHIVE: ${{ steps.ledger.outputs.archive }}
+          MUTMUT_PR_REMEASURE_FILE: ${{ steps.claims.outputs.patterns }}
           BASE: ${{ steps.range.outputs.base }}
           HEAD: ${{ steps.range.outputs.head }}
         run: |
           set +e
           ( while sleep 300; do echo "== resources $(date -u +%T)"; free -m; df -h / "$PWD"; done ) &
           sampler=$!
+          guard=""
+          if [ -x scripts/ci/mutant_memory_guard.py ]; then
+            .venv/bin/python scripts/ci/mutant_memory_guard.py --allowance-mb 2048 &
+            guard=$!
+          else
+            echo "::warning::mutant_memory_guard.py is not on this head; mutant memory is unbounded tonight (#971)"
+          fi
           checkpoints=""
           if [ -x scripts/ci/mutation_ledger.sh ]; then
             scripts/ci/mutation_ledger.sh loop "$BASE" "$HEAD" 900 &
@@ -154,8 +202,8 @@ jobs:
           fi
           scripts/mutmut-pr.sh "$BASE" 2>&1 | tee mutation-raw.log
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
-          kill "$sampler" $checkpoints 2>/dev/null
-          wait "$sampler" $checkpoints 2>/dev/null
+          kill "$sampler" $guard $checkpoints 2>/dev/null
+          wait "$sampler" $guard $checkpoints 2>/dev/null
           if [ -x scripts/ci/mutation_ledger.sh ]; then
             scripts/ci/mutation_ledger.sh save "$BASE" "$HEAD" \
               || echo "::warning::the final ledger checkpoint failed; the next night resumes from the last one"
@@ -190,6 +238,30 @@ jobs:
             --tool-exit-code "${{ steps.mut.outputs.exit_code || '3' }}" \
             --out mutation-result.json
 
+      # Every measured mutant with its verdict, the kind of change it makes and
+      # its time, read while the shadow tree is still on disk (#984). The
+      # result above names survivors only, with no kind and no time, and a
+      # killed mutant not at all. Two files join the artifact and the sums go
+      # to the job summary. This step gives no verdict and cannot fail the
+      # night. The `[ -x ]` guard is the repo rule for new scripts/ci calls (#381).
+      - name: Record every mutant with its verdict, kind and time
+        if: always() && steps.mut.outcome != 'skipped'
+        run: |
+          if [ -x scripts/ci/mutation_night.py ]; then
+            uv run python scripts/ci/mutation_night.py \
+              --commit "${{ steps.range.outputs.head }}" \
+              --result mutation-result.json \
+              --out-night mutation-night.json \
+              --out-mutants mutation-mutants.jsonl.gz \
+              --summary mutation-night.md \
+              || echo "::warning::mutation_night.py failed; the artifact has no per-mutant record tonight (#984)"
+            if [ -f mutation-night.md ]; then
+              cat mutation-night.md >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "::warning::scripts/ci/mutation_night.py is not on this head; no per-mutant record tonight (#984)"
+          fi
+
       - name: Upload mutation artifact
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -198,6 +270,9 @@ jobs:
           path: |
             mutation-result.json
             mutation-raw.log
+            mutation-night.json
+            mutation-mutants.jsonl.gz
+            mutation-claims.json
           if-no-files-found: ignore
 
       # Always yields a verdict: a missing result is `tool_failure`, never clean.
@@ -237,8 +312,47 @@ jobs:
             scripts/ci/mutation_ledger.sh drop
           fi
 
-      # One rolling issue, its body rewritten every night: GitHub mails on
-      # create, not on edit, so a night costs no notification after the first.
+      # What must outlive the artifact goes to the `mutation-reports` branch
+      # (#984): the register of mutants left alive over all nights, one history
+      # line for this night whatever its verdict, and the night's report in
+      # full. The register changes only on a completed night, the rule the tag
+      # follows. The step also writes the two texts the report step below puts
+      # on the issue. It cannot fail the night: without it the night is still
+      # in the artifact. The `[ -x ]` guard is the repo rule (#381).
+      - name: Keep the night on the mutation-reports branch
+        if: always() && steps.verdict.outcome == 'success'
+        env:
+          VERDICT: ${{ steps.verdict.outputs.verdict }}
+          COMPLETE: ${{ steps.verdict.outputs.complete }}
+          BASE: ${{ steps.range.outputs.base }}
+          HEAD: ${{ steps.range.outputs.head }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -x scripts/ci/mutation_reports.sh ]; then
+            scripts/ci/mutation_reports.sh publish "$RUNNER_TEMP/mutation-reports" \
+              --result mutation-result.json \
+              --night mutation-night.json \
+              --mutants mutation-mutants.jsonl.gz \
+              --claims mutation-claims.json \
+              --date "$(TZ=Europe/Oslo date '+%F')" \
+              --run-id "$GITHUB_RUN_ID" \
+              --run-url "$RUN_URL" \
+              --base "${BASE:-unknown}" \
+              --head "${HEAD:-$GITHUB_SHA}" \
+              --verdict "$VERDICT" \
+              --complete "${COMPLETE:-false}" \
+              --repo "$GITHUB_REPOSITORY" \
+              || echo "::warning::the night was not written to the mutation-reports branch; it is in the artifact only (#984)"
+          else
+            echo "::warning::scripts/ci/mutation_reports.sh is not on this head; the night is in the artifact only (#984)"
+          fi
+
+      # One rolling issue. Its body is rewritten every night and holds the
+      # state as it stands: this night's verdict and the register over all
+      # nights. Each night also gets one comment, so the nights can be read in
+      # order and GitHub mails them (owner decision 2026-11-21, #984): an edit
+      # mails nobody, which is how the survivors of 2026-11-20 left the issue
+      # unseen the night after.
       - name: Report — rewrite the Nightly mutation issue
         if: always() && steps.verdict.outcome == 'success'
         env:
@@ -265,7 +379,7 @@ jobs:
             echo "- Verdict: **$VERDICT** (gate reason: \`$REASON\`)"
             echo "- Range: \`${BASE:-unknown}...${HEAD:-unknown}\` — base from $SOURCE"
             echo "- Base tag \`$BASE_TAG\`: $tag_line"
-            echo "- Ledger: ${LEDGER:-unknown}. Counts below include the killed results it carried."
+            echo "- Ledger: ${LEDGER:-unknown}. Counts below include the killed, survived and timeout results it carried."
             echo "- Run: $RUN_URL"
             echo ""
             if [ "$VERDICT" = "partial" ] || [ "$VERDICT" = "budget_exceeded" ]; then
@@ -283,6 +397,10 @@ jobs:
             echo "Mutation is a nightly report, not a merge gate (docs/agentic-ci.md). Survivors are"
             echo "killed by a test, or, when provably equivalent, marked \`# pragma: no mutate\` with a"
             echo "one-line reason or registered in \`mutation-equivalents/\`. Never a \`src/\` rewrite."
+            if [ -f "$RUNNER_TEMP/mutation-reports/issue-section.md" ]; then
+              echo ""
+              cat "$RUNNER_TEMP/mutation-reports/issue-section.md"
+            fi
           } > "$body"
           gh label create "$ISSUE_LABEL" --color BFD4F2 \
             --description "Rolling nightly mutation report" --force
@@ -292,7 +410,12 @@ jobs:
             gh issue edit "$number" --body-file "$body"
             echo "updated issue #$number"
           else
-            gh issue create --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" --body-file "$body"
+            number="$(gh issue create --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" --body-file "$body")"
+            echo "created $number"
+          fi
+          if [ -f "$RUNNER_TEMP/mutation-reports/comment.md" ]; then
+            gh issue comment "$number" --body-file "$RUNNER_TEMP/mutation-reports/comment.md" \
+              || echo "::warning::the night's comment was not posted (#984)"
           fi
           cat "$body" >> "$GITHUB_STEP_SUMMARY"
 

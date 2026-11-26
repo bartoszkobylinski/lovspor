@@ -7,6 +7,7 @@ signs with a real key, writes a release or publishes.
 
 import ast
 import re
+from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ from lovspor.forarbeider.release_contract_models import (
     ApprovalEvidence,
     BatchSize,
     BudgetUsage,
+    ControlEvidence,
     DocumentInventory,
     HeadAnchor,
     InventoryEvidence,
@@ -34,11 +36,11 @@ from lovspor.forarbeider.release_contract_models import (
     LegalAssessmentEvidence,
     LimitsEvidence,
     PublisherIdentity,
-    ReleaseConstraints,
     ReleaseEvidence,
     ReleaseExecution,
     ReleaseGateVerdict,
     ReleaseIntent,
+    ReproductionEvidence,
     SignerRegistry,
 )
 from lovspor.forarbeider.release_gates import (
@@ -47,6 +49,8 @@ from lovspor.forarbeider.release_gates import (
     parse_verdict,
     verdict_text,
 )
+from lovspor.forarbeider.release_limits_models import ReleaseConstraints
+from lovspor.forarbeider.release_provenance import issue_provenance
 from lovspor.forarbeider.release_sources import (
     ReleaseRequest,
     ReleaseSources,
@@ -60,7 +64,12 @@ from lovspor.forarbeider.version_release import (
     release_text,
     verify_release,
 )
-from lovspor.forarbeider.version_release_models import Blocker, PolicyReference, ReleaseManifest
+from lovspor.forarbeider.version_release_models import (
+    Blocker,
+    PolicyReference,
+    ReleaseManifest,
+    ReleaseVerification,
+)
 from tests.unit.forarbeider_authorization_support import policy as synthetic_policy
 from tests.unit.forarbeider_lineage_support import LATER, Chain, chain, changed, original
 from tests.unit.test_forarbeider_version_release import (
@@ -75,6 +84,18 @@ BOT = "test-bot"
 BOT_KEY = "SHA256:" + "b" * 43
 OWNER_KEY = "SHA256:" + "o" * 43
 SOURCE_MODULES = ("release_contract_models", "release_gates", "release_sources")
+ROOT_SHA = "c" * 64
+LIMITS_SHA = "a" * 64
+CHECKED_AT = datetime(2026, 11, 14, 12, 0, tzinfo=UTC)
+ZERO = BudgetUsage(documents=0, files=0, bytes=0, commits=0)
+
+
+#: Records as the engine verifier for a kind would hand them over (test-only).
+sealed = issue_provenance
+
+
+def reproduced(verification: ReleaseVerification) -> ReproductionEvidence:
+    return sealed(ReproductionEvidence(verification=verification), "manifest_reproduction")
 
 
 # --- synthetic evidence --------------------------------------------------------------
@@ -110,14 +131,17 @@ def baseline() -> ReleaseEvidence:
     return ReleaseEvidence(
         intent=intent(manifest),
         manifest=manifest,
-        reproduction=reproduction,
+        reproduction=reproduced(reproduction),
         inventory=inventory(ids),
         anchors=tuple(
             anchor(b.document_id, b.lineage_head_sha256, b.lineage_entries)
             for b in manifest.bindings
         ),
-        registry=SignerRegistry(
-            trust_root_sha256="c" * 64, origin="engine_pinned", owner_keys=1, bot_keys=1
+        registry=sealed(
+            SignerRegistry(
+                trust_root_sha256=ROOT_SHA, origin="engine_pinned", owner_keys=1, bot_keys=1
+            ),
+            "signer_registry",
         ),
         publisher=publisher(),
         approvals=(approval(),),
@@ -128,19 +152,54 @@ def baseline() -> ReleaseEvidence:
             reference_stated="synthetic assessment reference",
             reasons=(),
         ),
-        limits=LimitsEvidence(
-            status="verified",
-            source="owner_signed_policy_limits",
-            constraints=constraints(),
-            reasons=(),
-        ),
-        ledger=LedgerEvidence(
-            status="verified",
-            source="runner_budget_ledger",
-            consumed=BudgetUsage(documents=0, files=0, bytes=0, commits=0),
-            reasons=(),
+        limits=limits_evidence(),
+        ledger=ledger_evidence(),
+        control=sealed(
+            ControlEvidence(
+                status="verified",
+                source="owner_signed_control",
+                reasons=(),
+                policy_id=policy_reference().policy_id,
+                state="not_stopped",
+                active_stops=(),
+                records=1,
+                head_sha256="1" * 64,
+                trust_root_sha256=ROOT_SHA,
+            ),
+            "release_control",
         ),
     )
+
+
+def limits_evidence(**changes: Any) -> LimitsEvidence:
+    fields: dict[str, Any] = {
+        "status": "verified",
+        "source": "owner_signed_policy_limits",
+        "constraints": constraints(),
+        "policy": policy_reference(),
+        "limits_id": "limits-001",
+        "limits_sha256": LIMITS_SHA,
+        "trust_root_sha256": ROOT_SHA,
+        "signer_fingerprint": OWNER_KEY,
+        "signer_role": "owner_policy",
+        "reasons": (),
+    }
+    return sealed(LimitsEvidence(**(fields | changes)), "publication_limits")
+
+
+def ledger_evidence(**changes: Any) -> LedgerEvidence:
+    fields: dict[str, Any] = {
+        "status": "verified",
+        "source": "runner_budget_ledger",
+        "reasons": (),
+        "day": CHECKED_AT.date(),
+        "limits_sha256": LIMITS_SHA,
+        "committed": ZERO,
+        "reserved": ZERO,
+        "entries": 1,
+        "head_sha256": "2" * 64,
+    }
+    return sealed(LedgerEvidence(**(fields | changes)), "budget_ledger")
 
 
 def intent(manifest: ReleaseManifest, **changes: Any) -> ReleaseIntent:
@@ -194,7 +253,7 @@ def publisher(**changes: Any) -> PublisherIdentity:
         "role": "bot_execution",
         "namespaces": ("lovspor-forarbeider-publication", "lovspor-forarbeider-release"),
     }
-    return PublisherIdentity(**(fields | changes))
+    return sealed(PublisherIdentity(**(fields | changes)), "publisher_identity")
 
 
 def approval(**changes: Any) -> ApprovalEvidence:
@@ -208,11 +267,12 @@ def approval(**changes: Any) -> ApprovalEvidence:
         "legal_reference_stated": "synthetic assessment reference",
         "governance": Governance(),
     }
-    return ApprovalEvidence(**(fields | changes))
+    return sealed(ApprovalEvidence(**(fields | changes)), "policy_approval")
 
 
 def constraints(**changes: Any) -> ReleaseConstraints:
     fields: dict[str, Any] = {
+        "max_documents_per_batch": 100,
         "max_files_per_batch": 100,
         "max_bytes_per_batch": 25_000_000,
         "max_documents_per_day": 500,
@@ -462,7 +522,7 @@ def test_a_manifest_ahead_of_its_anchor_is_unanchored() -> None:
     verdict = evaluated(
         intent=intent(manifest),
         manifest=manifest,
-        reproduction=reproduction,
+        reproduction=reproduced(reproduction),
         inventory=inventory((FIRST,)),
         anchors=(anchor(FIRST, sha(built.raws[0]), 1),),
     )
@@ -479,7 +539,7 @@ def test_an_incomplete_lineage_fails_lineage_and_evidence() -> None:
     verdict = evaluated(
         intent=intent(manifest),
         manifest=manifest,
-        reproduction=reproduction,
+        reproduction=reproduced(reproduction),
         inventory=inventory((FIRST,)),
         anchors=(anchor(FIRST, sha(built.raws[-1]), 2),),
     )
@@ -512,10 +572,10 @@ def test_a_changed_manifest_is_not_reproduced() -> None:
     altered[key] = altered[key] + b" "
     offers = [offer(chains[0]), offer(chains[1], SECOND)]
     reproduction = verify_release(release_text(manifest).encode(), offers, altered)
-    verdict = evaluated(reproduction=reproduction)
+    verdict = evaluated(reproduction=reproduced(reproduction))
     assert "reproduction_invalid" in codes(verdict, "manifest_reproduced")
     assert verdict.status == "refused"
-    assert evidence.reproduction.status == "reproduced"
+    assert evidence.reproduction.verification.status == "reproduced"
 
 
 def test_an_intent_naming_another_release_is_refused() -> None:
@@ -535,8 +595,10 @@ def test_an_intent_naming_other_documents_is_refused() -> None:
 
 def test_a_reproduction_of_another_manifest_does_not_count() -> None:
     evidence = baseline()
-    other = evidence.reproduction.model_copy(
-        update={"offered_release_id": "0" * 64, "rebuilt_release_id": "0" * 64}
+    other = reproduced(
+        evidence.reproduction.verification.model_copy(
+            update={"offered_release_id": "0" * 64, "rebuilt_release_id": "0" * 64}
+        )
     )
     verdict = evaluated(reproduction=other)
     assert "reproduction_of_other_manifest" in codes(verdict, "manifest_reproduced")
@@ -560,7 +622,7 @@ def test_an_unevaluated_document_has_unassessed_rights() -> None:
     verdict = evaluated(
         intent=intent(manifest),
         manifest=manifest,
-        reproduction=reproduction,
+        reproduction=reproduced(reproduction),
         inventory=inventory((FIRST,)),
         anchors=(anchor(FIRST, sha(built.raws[-1]), 1),),
         approvals=(),
@@ -659,7 +721,7 @@ def test_a_stated_legal_reference_never_counts_as_acceptance() -> None:
 
 def test_missing_limits_and_ledger_block() -> None:
     limits = LimitsEvidence(status="missing", source=None, constraints=None, reasons=("x",))
-    ledger = LedgerEvidence(status="missing", source=None, consumed=None, reasons=("x",))
+    ledger = LedgerEvidence(status="missing", source=None, reasons=("x",))
     verdict = evaluated(limits=limits, ledger=ledger)
     assert {"limits_missing", "budget_ledger_missing"} <= codes(verdict, "constraints")
 
@@ -672,8 +734,8 @@ def test_an_exceeded_batch_limit_fails() -> None:
 
 
 def test_a_batch_above_the_signed_limits_fails() -> None:
-    limits = baseline().limits.model_copy(
-        update={"constraints": constraints(max_files_per_batch=3, max_bytes_per_batch=100)}
+    limits = limits_evidence(
+        constraints=constraints(max_files_per_batch=3, max_bytes_per_batch=100)
     )
     verdict = evaluated(limits=limits)
     assert {"batch_files_exceeded", "batch_bytes_exceeded"} <= codes(verdict, "constraints")
@@ -681,7 +743,7 @@ def test_a_batch_above_the_signed_limits_fails() -> None:
 
 def test_an_exceeded_daily_budget_fails() -> None:
     used = BudgetUsage(documents=499, files=1_999, bytes=199_990_000, commits=20)
-    ledger = baseline().ledger.model_copy(update={"consumed": used})
+    ledger = ledger_evidence(committed=used)
     verdict = evaluated(ledger=ledger)
     assert {
         "budget_documents_exceeded",
@@ -704,10 +766,12 @@ def test_a_batch_size_contradicting_the_intent_is_refused() -> None:
 def test_unavailable_sources_report_missing_never_verified() -> None:
     sources = Unavailable()
     assert sources.anchor(FIRST).status == "missing"
-    assert sources.inventory().status == "missing"
+    assert sources.inventory().records == ()
+    assert sources.inventory().catalogue == ()
     assert sources.assessment().status == "missing"
-    assert sources.limits().status == "missing"
-    assert sources.consumed().status == "missing"
+    assert sources.limits().records == ()
+    assert sources.history() == ()
+    assert sources.entries() == ()
 
 
 def test_collected_evidence_is_blocked_and_replays_deterministically(tmp_path: Path) -> None:
@@ -715,9 +779,11 @@ def test_collected_evidence_is_blocked_and_replays_deterministically(tmp_path: P
     offers = [offer(built, authorization=request)]
     manifest = build_release(offers, built.artifacts, root)
     raw = release_text(manifest).encode()
-    release_request = ReleaseRequest(intent(manifest), raw, tuple(offers), built.artifacts, root)
+    release_request = ReleaseRequest(
+        intent(manifest), raw, tuple(offers), built.artifacts, root, CHECKED_AT
+    )
     evidence = collect_evidence(release_request, ReleaseSources())
-    assert evidence.reproduction.status == "reproduced"
+    assert evidence.reproduction.verification.status == "reproduced"
     assert evidence.approvals and evidence.approvals[0].automated_publication == "verified"
     assert evidence.registry.origin == "unpinned"
     verdict = evaluate_release(evidence)
@@ -733,7 +799,9 @@ def test_collecting_refuses_a_manifest_that_does_not_parse(tmp_path: Path) -> No
     built = chain(original())
     manifest = build_release([offer(built)], built.artifacts)
     raw = release_text(manifest).encode() + b" "
-    request = ReleaseRequest(intent(manifest), raw, (offer(built),), built.artifacts, None)
+    request = ReleaseRequest(
+        intent(manifest), raw, (offer(built),), built.artifacts, None, CHECKED_AT
+    )
     with pytest.raises(ForarbeiderRefusedError):
         collect_evidence(request, ReleaseSources())
 
@@ -745,7 +813,8 @@ def test_the_publisher_is_resolved_from_the_registry_not_the_intent(tmp_path: Pa
     raw = release_text(manifest).encode()
     claimed = intent(manifest, publisher_principal="test-owner")
     evidence = collect_evidence(
-        ReleaseRequest(claimed, raw, tuple(offers), built.artifacts, root), ReleaseSources()
+        ReleaseRequest(claimed, raw, tuple(offers), built.artifacts, root, CHECKED_AT),
+        ReleaseSources(),
     )
     assert evidence.publisher.role == "owner_policy"
     verdict = evaluate_release(evidence)

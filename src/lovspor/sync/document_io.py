@@ -99,6 +99,11 @@ def document_path(
     return corpus_root / subdir / f"{slug}.md"
 
 
+def embeddings_path(corpus_root: Path, source_dataset: str, slug: str) -> Path:
+    """Resolve the on-disk ``.bin`` sidecar path for a document's embeddings."""
+    return dataset_dir(corpus_root, source_dataset) / "embeddings" / f"{slug}.bin"
+
+
 def render_full_document(
     xml_bytes: bytes,
     context: FrontmatterContext,

@@ -1,0 +1,112 @@
+name: Verify lovverk deploy key
+
+# One-time check of the environment-scoped lovverk deploy key (rotation of
+# 2026-11-19, deploy key id 170454523), so the old repository secret can be
+# revoked without waiting for a scheduled sync to prove the new key.
+#
+# What it does NOT do:
+# - check out or run any project code (no actions, no checkout);
+# - change any remote ref: the only push is `git push --dry-run`, and the job
+#   fails if `main`, the notes ref or any `sync/*` tag moved while it ran;
+# - print the key: only its public fingerprint is logged.
+#
+# The key is read from the `lovverk-sync` and `lovverk-seal` environments,
+# whose deployment branch policy admits `main` only. An environment secret
+# overrides a repository secret of the same name, and the fingerprint check
+# below fails if the job was handed any other key (for example the old
+# repository secret). Remove this workflow once the old key is revoked.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [lovverk-sync, lovverk-seal]
+    environment: ${{ matrix.environment }}
+    env:
+      LOVVERK_URL: git@github.com:bartoszkobylinski/lovverk.git
+      # Public fingerprint of deploy key 170454523; not a secret.
+      EXPECTED_FINGERPRINT: SHA256:2u9LOHT5MvZzD43sKSefASZU7ATifgXb8ydhP4vAwwA
+      # A ref that does not exist on lovverk; the dry-run push targets it.
+      PROBE_REF: refs/heads/deploy-key-verification-dry-run
+    steps:
+      # Same host-key pin as sync.yml: no ssh-keyscan, fail closed on rotation.
+      - name: Install the key and pin github.com
+        env:
+          DEPLOY_KEY: ${{ secrets.LOVVERK_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/lovverk_deploy_key
+          cat > ~/.ssh/known_hosts <<'EOF'
+          github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+          EOF
+          cat > ~/.ssh/config <<'EOF'
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/lovverk_deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+
+      - name: Check it is the environment-scoped key
+        run: |
+          set -euo pipefail
+          actual=$(ssh-keygen -y -f ~/.ssh/lovverk_deploy_key | ssh-keygen -lf - | awk '{print $2}')
+          echo "environment: ${{ matrix.environment }}"
+          echo "key fingerprint: $actual"
+          if [ "$actual" != "$EXPECTED_FINGERPRINT" ]; then
+            echo "::error::The job was not handed deploy key 170454523."
+            exit 1
+          fi
+
+      - name: Authenticate to lovverk over SSH
+        run: |
+          set -uo pipefail
+          # github.com closes the session after the greeting, so ssh -T exits 1.
+          out=$(ssh -T git@github.com 2>&1 || true)
+          echo "$out"
+          printf '%s\n' "$out" | grep -q '^Hi bartoszkobylinski/lovverk! You'"'"'ve successfully authenticated'
+
+      - name: Record remote refs before
+        run: |
+          set -euo pipefail
+          git ls-remote "$LOVVERK_URL" refs/heads/main refs/notes/temporal-attestations 'refs/tags/sync/*' \
+            | sort | tee "$RUNNER_TEMP/refs-before"
+          test -s "$RUNNER_TEMP/refs-before"
+
+      # A dry run still opens git-receive-pack, which GitHub refuses for a
+      # read-only deploy key, but it sends no objects and updates no ref.
+      - name: Check write access with a dry-run push
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/probe"
+          git init -q "$probe"
+          git -C "$probe" -c user.name=probe -c user.email=probe@invalid \
+            commit -q --allow-empty -m "deploy key verification (never pushed)"
+          git -C "$probe" push --dry-run --porcelain "$LOVVERK_URL" "HEAD:$PROBE_REF"
+
+      - name: Confirm no remote ref changed
+        run: |
+          set -euo pipefail
+          git ls-remote "$LOVVERK_URL" refs/heads/main refs/notes/temporal-attestations 'refs/tags/sync/*' \
+            | sort > "$RUNNER_TEMP/refs-after"
+          diff "$RUNNER_TEMP/refs-before" "$RUNNER_TEMP/refs-after"
+          if [ -n "$(git ls-remote "$LOVVERK_URL" "$PROBE_REF")" ]; then
+            echo "::error::$PROBE_REF exists on lovverk."
+            exit 1
+          fi
+          echo "No lovverk ref changed; $PROBE_REF does not exist."
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/lovverk_deploy_key

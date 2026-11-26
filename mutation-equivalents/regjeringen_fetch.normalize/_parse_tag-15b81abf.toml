@@ -1,0 +1,21 @@
+[[equivalent]]
+file = "src/lovspor/regjeringen_fetch/normalize.py"
+symbol = "_parse_tag"
+registered = "2026-11-22, from register key 0338e5f08f0bf054 (GREEN under scripts/ci/mutant_check.py try with the PR #1002 tests)"
+mutation = """
+-            return _Tag(name, tuple(attributes)), after_space + 1
++            return _Tag(name, tuple(attributes)), after_space - 1
+"""
+justification = """
+On a tag closed by `>` at `after_space`, the mutant resumes at `after_space - 1`
+instead of `after_space + 1`. The next consumer, `_after_start_tag`, either
+returns -1 (plaintext, independent of the position), searches the raw-text
+closing pattern, or returns the position for `raw.find(b"<", position)`; both
+searches need a `<` to start a match. `raw[after_space]` is `>`, and
+`raw[after_space - 1]` is whitespace, the last byte of the tag name
+(`_TAG_NAME`), of an attribute name (`_NAME_STOP` holds `<`), of an unquoted
+value (`_UNQUOTED_STOP` holds `<`) or a closing quote: never `<`. So both
+positions find the same next match, and the position stays past `opening`,
+so the tag is not scanned twice. The `/>` twin (`after_space - 2`) is not
+equivalent and is killed by test_a_one_letter_self_closing_tag_is_scanned_past.
+"""

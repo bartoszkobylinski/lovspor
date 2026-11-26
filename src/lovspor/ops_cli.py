@@ -15,6 +15,7 @@ from typing import Annotated
 import typer
 
 from lovspor import eli_commands as _eli_commands  # noqa: F401
+from lovspor import owner_changes_cli as _owner_changes_cli  # noqa: F401
 from lovspor.crosswalk import commands as _crosswalk_commands  # noqa: F401
 from lovspor.embeddings import cache_cli as _embedding_cache_cli  # noqa: F401
 from lovspor.forarbeider import commands as _forarbeider_commands  # noqa: F401

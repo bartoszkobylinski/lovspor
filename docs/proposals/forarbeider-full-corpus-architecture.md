@@ -743,6 +743,627 @@ Owner actions on quarantine are **exceptions**, by design rare:
 | **AR7** Bootstrap and settings verifier (read-only) | before every run, reads the **actual** remote settings through the GitHub API (repository rulesets and their bypass actors, the effective rules on `main`, collaborators and roles, deploy keys and their write flag, visibility) and compares them with the expected configuration of §9.7 | a missing rule, bypass on R-integrity, a bot with admin or an unexpected visibility refuses the run; **an unexpected ruleset bypass actor** (any actor beyond the expected App id and the admin role, including a `DeployKey` actor with `actor_id: null` when the App path is used) refuses; **an unexpected write-enabled deploy key** refuses; App permissions wider than Contents: write, or installed on other repositories, refuse; the App id, slug and installation id must equal the pinned identity, and the configured publication path (A or B) must equal the expected settings; any API read that fails refuses; a fixture of API responses per case | yes |
 | **AR8** Independent auditor | the owner-account, read-only re-verification of every new `main` commit by §9.3a step 2: signature class per configured path, App identity, parent and base, file set, manifest bot signature, historical policy binding | a forged, unsigned, out-of-manifest or wrongly policy-bound commit alerts; a commit of the wrong signature class or another App alerts; a valid App commit with an invalid bot-signed manifest alerts; a commit with valid integrity but `authorization_unknown` or `unauthorized` alerts; a valid, authorized one passes | alerts on failure |
 
+**AR1 status (#947, AR1b).** AR1 shipped as release contracts and pure gates (#947). AR1b adds the rest of the AR1 row:
+- owner-signed limits (batch caps, daily budgets) in the namespace `lovspor-forarbeider-limits`;
+- the budget ledger's accounting records with their replay verifier and planner;
+- owner-signed stop and resume records in the namespace `lovspor-forarbeider-control`;
+- one resolved trust root for all release evidence;
+- a sealed-provenance boundary, so a source label alone is never trusted.
+
+The owner role may now hold the policy, limits and control namespaces; a bot key can hold none of them. Two hash chains still prove less than they appear to, so their gates stay failed until AR5 adds what is missing:
+- **Budget ledger.** A local chain proves neither append-only storage nor concurrency safety. AR5 must provide:
+  - an atomic append with compare-and-swap on the chain head;
+  - durability before the publication call;
+  - an external anchor of the head, outside the runner;
+  - a single-writer lock;
+  - reserve before publication, settle after verification;
+  - reconciliation against the published history.
+- **Control chain.** Whoever holds the chain can withhold its newest stop. AR5 must anchor the chain's head outside the runner.
+
+The provenance seal is narrower than it looks, too. It assumes that all code running in the engine process is trusted:
+- **`issue_provenance()` is an ordinary callable, not a runtime authorization boundary.** Any code in the same process can import it and seal a record it built itself, without knowing the HMAC key.
+- **The AST import test is a review aid, not runtime security.** It limits which modules in this repository import the function today. It cannot stop code loaded at runtime.
+- **Untrusted code must never reach the sealing capability.** Before AR4–AR8 integrate the gates into a production path, that path must guarantee that no untrusted code, plugin, extension or API input runs in, or can call into, the process that seals and judges evidence. Caller input reaches the engine only as raw material that a verifier checks, never as evidence.
+- **An in-process HMAC seal is not auditable proof.** It shows only that this process's verifier produced the record. It proves nothing to an auditor, another process or a later run, and it is lost on serialization by design.
+- **Persisted or externally verified evidence needs real signatures (AR6).** It must carry a signature that can be checked against the trust root, never a seal.
+
+**AR2 status.** AR2 adds the expected-document inventory and the batch planner:
+- **Owner-signed inventory** in the namespace `lovspor-forarbeider-inventory`. It binds the exact policy and scope, an inventory id and version, a validity window, the digests of the discovery evidence the owner reviewed, and every expected document with its stable upstream id, type and discovery URL. It attests `completeness: complete`. Two valid inventories conflict, and the owner replaces one by revoking it.
+- **No inventory from a catalogue yet.** FC11 discovery has no verifier of a catalogue's authenticity, and D7 is open. Catalogue pages alone therefore stay `missing` (`catalogue_verifier_not_implemented`) and never become an inventory.
+- **Deterministic planner.** FC8b rebuilds each offered document's selection, so only the newest verified version is used and a blocked head is never replaced. Every inventory document, and every document offered outside it, gets one visible disposition: `planned`, `blocked`, `excluded`, `missing` or `outside_inventory`.
+- **Sizes counted from artifacts.** Each document's file count and byte size are computed from its bound artifact bytes. An artifact that is missing, or does not hash to its key, excludes the document. Planned documents are split, in id order, into the fewest batches that keep both the hard caps and the signed batch limits. A document larger than any batch is blocked.
+- **Stable, binding identifiers.** Plan and batch ids are digests of the inventory, policy, limits, selection and artifacts, so any change makes a stored plan `stale`.
+- **What the planner leaves to the gates.** It plans a document only when its sole blockers are the release-wide ones that FC8b gives every document today: the unanchored head, D10 and D11. The plan names those blockers, and the AR1 gates still fail on them. Any other blocker, such as FC7, FC7b, completeness, privacy or a foreign policy, keeps the document out of every batch.
+- **Gate integration.** The inventory gate requires a sealed plan bound to the sealed inventory and the signed limits, of which the manifest is exactly one batch, selection by selection and binding by binding. Two observations can share a selection and a version yet rest on different FC6, FC5, FC7 or FC7b records or lineage heads, so each planned document names both digests, and a batch document whose binding differs refuses the release (`batch_artifact_binding_mismatch`). A document the plan did not plan blocks the release (`document_not_planned`). Planned documents grouped differently from the plan's batches refuse it (`batch_not_in_plan`). The constraints gate checks caps and budgets against the planner's count. The caller's batch size is only compared with that count; without a plan it is `batch_size_unverified`.
+
+Limitations:
+- Sizes use the bound private artifacts (`size_basis: bound_artifacts`). AR4 must recount them from the rendered publication bytes it proposes.
+- Daily budgets are checked when a batch is reserved, by the ledger and the constraints gate, not when it is planned.
+- Today no real document is plannable: publication completeness is never reached, so every selection carries a per-document blocker.
+
+**AR3 status.** AR3 adds quarantine, failure attribution and re-planning (§9.4, §9.6):
+- **Attribution by exact code, fail closed.** Every failure in the AR2 base plan, and every failure a later stage reports, is looked up in an explicit table. A failure is quarantined only when it is proven to belong to one document: extraction, rendering, artifact integrity, rights or privacy spans, attachments, source or publication completeness. Anything else is a global failure: the trust root or a signature, the policy (another policy, none evaluated, not applicable), FC7b authorization, a rewritten or forked lineage (the private store), a source-wide proof mismatch, the repository, publication authorization. An unknown code, a summary code without its details, or an FC7 decision that cannot be read or contradicts its counts is a global failure of category `unknown`. One global failure halts the run: nothing is merged and nothing is re-planned.
+- **Pending decisions are not failures.** The release-wide blockers (the unanchored head, D10, D11) and FC7b's always-blocking codes (D6, D10, D11, the missing integration) neither quarantine nor halt; the AR1 gates judge them.
+- **Quarantine records.** Each record is keyed by document, exact version, scope (document, part, span or attachment) and reason code. It keeps `first_seen`, the evidence digests and policy of its latest observation, and an append-only history (`observed`, `evidence_changed`, `cleared`, `reinstated`). Spans and parts are named by their FC5 ids and attachments by a digest: no text, URL or name. A retry gives the same bytes. A failure no longer reported, a new version (another record) or a policy change never clears a record.
+- **The ledger** is private (`published: false`) and canonical; a successor that drops or rewrites anything is detected (`successor_findings`). Quarantine is separate from the runner's STOP: a halt is reported for the kill switch to act on, and no stop record is written.
+- **Owner exceptions** are signed in the namespace `lovspor-forarbeider-quarantine`, which only an owner key may hold. They bind the exact policy, document, version and evidence digests. A clearance covers one finding, one reason class of a version, or one version; an exclusion is permanent and has a reason code. A forged exception, a bot or revoked key, another namespace or an unverifiable revocation halts the run. An expired, premature, revoked or foreign-policy exception is only rejected. A stored `cleared` is never trusted: clearances are re-verified on every run, and a record whose clearance is not offered, or whose evidence changed, is reinstated. A clearance lifts only the quarantine: the document's FC7, privacy, completeness and integrity blockers, and every AR1 gate, still apply.
+- **Re-planning.** The planner accepts only a sealed quarantine assessment made from the same root, inventory and limits for exactly its base plan (`plan_quarantine_unverified`, `plan_quarantine_mismatch`, `plan_quarantine_stale`). A restricted document is `quarantined`: it is visible with its version, binding, artifacts and every reason, but never batched. The other documents keep their order and are partitioned again within the same caps. The basis names the quarantine set's digest, so changed membership changes the plan and batch ids. A plan made without a quarantine assessment blocks the inventory gate (`plan_quarantine_unassessed`).
+- **Metrics:** `documents_expected`, `documents_ingested`, `documents_source_complete`, `documents_quarantined`, `documents_excluded_by_owner`, `documents_planned`, `spans_rights_unresolved`, `spans_privacy_unresolved`, `attachments_unpublishable` and release gaps by category. Quarantined documents stay in every denominator.
+
+Limitations:
+- The ledger is a local file. Like the budget ledger, it proves neither that it was not withheld nor that it was not replaced; atomic persistence, compare-and-swap and an external anchor of its digest are AR5. A lost ledger is not detectable before then.
+- `collect_evidence` does not run quarantine yet. AR4 must pass the sealed quarantine assessment into the planning it does, and report the stage failures (rendering, publication) it finds.
+- Under any trust root other than the engine-pinned one (every test and pilot root), every real run halts: each real document carries `fc7b:trust_root_not_engine_pinned`, which is global. In the offline pilot this was the only global failure; Prop. 31 L would otherwise get 416 span findings (rights) and one completeness finding.
+
+**AR4a status.** AR4a builds the offline preparation half of AR4 (§9.3 step 3): the exact proposed bytes of one batch, prepared and validated in an isolated clone, with a crash-safe journal. Nothing is authorized, signed or published.
+- **Transaction contract** (`publication_models`, version `publication-transaction/1`). A transaction binds the sealed plan, the batch, the quarantine set the plan honoured, each document's selection and binding digests, the base commit and the proposed files with digests, sizes and the digests they replace. The id is the digest of all of that. Paths A and B are separate record types, and the path is part of the content. So a transaction prepared for path A is never path B's: it gets another id and another release manifest.
+- **Publication tree of `lovverk-forarbeider`.** Exactly four kinds of file exist: `documents/regjeringen-<id>.md`, `INDEX.md`, `catalogue.json` (the membership list) and one `releases/<sha256>.json` per batch, named by the digest of its own bytes. A proposal can touch no other path.
+- **Isolated clone.** The local source repository is only read. Git clones it with `--no-local --no-hardlinks --template=` into a private work directory outside every repository, checks out the base detached and removes the clone's only remote. The source's `main` must be exactly the expected base. Git runs through `lovspor.git_prepare`, whose allowlist has no shape for `commit`, `push`, `fetch`, `add` or any ref update. Only `publication_clone` imports it.
+- **Bindings first.** Each of these halts before anything is written: a plan without the planner's seal, a plan without a quarantine assessment, a quarantine other than the plan's, a batch the plan does not have, a missing row, a selection or binding digest other than the planned one, or a quarantined document in the batch.
+- **Re-evaluation on the proposed bytes.** The bound FC6 manifest and raw pages must reproduce the extraction. The bound FC7 decision must be the selection's version and policy, with its rules satisfied and every rendered span `allow`. The selection must state source and publication completeness.
+- **Rendering.** Only non-annex spans are rendered, escaped as in the manual renderer. Unsafe text is refused. Counts are recounted from the rendered files, and the plan's caps apply to them.
+- **Write and read-back.** The B1b `flock` lock and descriptor-only staging inside `.git` are reused, with a new journal of preparation states: `staging`, `staged`, `documents_written`, `index_written`, `manifest_written`, `reading_back`, `prepared`, and `rolling_back`, which only goes back. The read-back requires all of the following:
+  - `HEAD` is still the base;
+  - Git reports exactly the proposal's paths: new files `??`, replaced files ` M`, nothing ignored, staged or elsewhere;
+  - every file holds its digest.
+- **Failure handling.**
+  - A document-local failure writes nothing and is returned as an AR3 stage failure (`artifact_integrity_mismatch`, `render_failed`) with its evidence digests. AR3 then quarantines the document, and the re-planned batch of the other documents prepares.
+  - A global or ambiguous failure halts, and is never downgraded however many local failures there are. Examples: an FC7 decision that is unavailable or contradicts the plan, another base, a version or release already published, a base tree whose documents are not exactly its catalogue's, or a read-back that finds an unexpected change.
+  - A failed read-back rolls the proposal back. The halt carries a `PreparationHalt` record for AR5. No stop record is written.
+- **Recovery.** A journal is accepted only if it is canonical and describes its own transaction; anything else is refused and nothing is touched. Recovery reconstructs a proposal only when every write landed, the caller expects exactly the journaled transaction, and the read-back proves it. Otherwise it rolls back. It never goes forward from `rolling_back`, never overwrites a file edited by hand, and never publishes.
+
+Limitations:
+- **No real document can be prepared today.** FC6 never computes `publication_complete` (`publication_constraints_absent`), so no real selection is planned. Under any trust root but the engine-pinned one, the AR3 run halts first. In the offline pilot, Prop. 31 L halted on `fc7b:trust_root_not_engine_pinned`, and its AR2 plan has no batch. AR4a was demonstrated on invented documents whose rows *state* completeness, as the AR2 and AR3 tests do.
+- **AR4a is a library.** No CLI command reaches it yet, and `collect_evidence` does not call it.
+- **Left to AR4b:** step 5's publication authorization and attempt record; paths A and B themselves (the GraphQL mutation and the local commit and push); the post-publication verification; §9.3a. **Left to AR5:** the stop latch, budget reservation and a durable halt record. **Left to AR6:** the bot signature on the release manifest (`signature: not_signed_ar6_pending`). **Left to AR7:** the remote settings, and comparing the source `main` with the remote. Each is listed in `unavailable_checks` and never reported as passed.
+- The renderer is a first, deterministic format for spans only. Tables, footnotes and annexes are not rendered.
+
+**AR4b-1 status.** AR4b-1 adds §9.3 step 5 and the publication call of both paths, executable **in simulation only**. Production execution is denied by construction.
+- **Authorization evidence** (`publication_execution_models`, version `publication-authorization/1`). It binds:
+  - the attempt id, which is derived from the transaction and its next sequence number, never chosen;
+  - the transaction, plan, batch and release manifest;
+  - every proposed file and its digest;
+  - the path, the base commit and the remote `main` as read at that moment;
+  - the policy, the trust root and the publisher's key;
+  - the STOP state, the quarantine, the limits and the budget reservation;
+  - the check time and every check.
+- **Check results.** Each check is `passed`, `failed` or `unavailable`, and unavailable is never passed. The decision follows from the checks alone, and the verifier seals the evidence. Evidence built or edited by a caller is refused, and so is evidence for another attempt or older than 120 seconds.
+- **`authorize` checks everything itself, at the moment of the attempt:**
+  - the AR4a `prepared` journal and its read-back;
+  - the sealed plan and quarantine;
+  - the trust root;
+  - the FC7b approvals and revocations;
+  - the bot publisher key;
+  - the owner-signed limits;
+  - the STOP/RESUME chain and the persistent stop latch;
+  - a ledger reservation for exactly this transaction that covers the batch and one commit;
+  - the remote head against the base;
+  - the configured path and App identity;
+  - on path B, the local commit's parent, paths, blobs and bot signature in the release namespace.
+- **What stays unavailable.** The following cannot pass yet:
+  - the AR1 gate verdict, which has no passing state;
+  - FC7b's pending blockers (D6, D10, D11, the missing integration, an unpinned trust root);
+  - the AR5 anchors of the control chain and the ledger;
+  - the AR6 manifest signature;
+  - the AR7 settings.
+
+  Production needs every check passed, so it is denied. A simulation may waive exactly those, each listed in `waived`.
+- **Attempt records** (`publication_attempts`). They are append-only and hash-linked, with one folder per transaction. `prepared_to_send` is written and synced **before** the mutation; after it comes exactly one of `published`, `refused` (provably nothing published) or `outcome_unknown`. Retries follow the last record:
+  - after `published`, a retry is `unchanged`;
+  - after a `prepared_to_send` with nothing following, or after `outcome_unknown`, a retry is `recovery_required`, and nothing is sent blindly.
+
+  A STOP, a revocation or an unknown outcome sets the persistent stop latch, which only an AR5 owner resume will clear.
+- **Simulation adapters** (`publication_sandbox`). A simulation waives the checks above, so its label is no boundary. It sends only through these two adapters. Each is proved before authorization, again before `prepared_to_send` is recorded, and again right before the mutation:
+  - **Path A** uses exactly the in-memory `SimulatedGitHub`, checked by type identity. It is a slotted, final class, so an instance cannot swap its methods and a subclass is refused. Any other transport, a real client included, is refused before it is read or posted to.
+  - **Path B** uses a `DisposableRemote`. `create_disposable_remote` makes it fresh, with no template, as the only entry of a private, empty sandbox. Before every use it is re-verified on disk:
+    - no symlink or `..` in its name;
+    - exactly its fixed configuration (bare, `denyNonFastForwards`, `denyDeletes`);
+    - no hooks and no alternates;
+    - the marker holds its random token.
+
+  Any other path, a pre-existing repository included, is refused.
+- **Path A** (`publication_path_a`). It builds one `createCommitOnBranch` with `expectedHeadOid` = the base. The mutation binds the repository, `main`, a headline naming the manifest digest, a body naming the transaction, plan and batch, and exactly the proposed bytes. The response is judged as follows:
+  - a stale-head refusal is `refused`;
+  - a well-formed commit with `main` reading as it is `published`;
+  - anything else, including a lost response, is `outcome_unknown`.
+
+  The module holds no transport. The only implementation is the tests' in-memory stub.
+- **Path B** (`publication_path_b`, `lovspor.git_publish`).
+  - The commit object is built from a separate index, so the clone's index and the AR4a read-back are untouched. It is signed in the `gpgsig` header by the caller's signer, in the release namespace, and validated before authorization.
+  - It is pushed `<commit>:refs/heads/main` to an **absolute local `.git` path** only. The allowlist has no force, delete or mirror shape, no `+` refspec and no URL.
+  - The result is judged from the remote `main` afterwards.
+
+Limitations:
+- **Production is disabled.** No GitHub transport, network remote or production signer exists. Real Prop. 31 L remains blocked upstream: the AR3 run halts on the unpinned trust root.
+- **Unknown outcomes stop at `recovery_required`.** Resolving them from the remote history (§9.3a), post-publication verification (A7/B10), receipts and attestations are AR4b-2 and AR6.
+- **The attempt folder and the stop latch are local.** Like the AR3 ledger, they prove neither that they were not withheld nor that the newest record was not replaced by an equally canonical one. Anchoring is AR5.
+- **The budget reservation is only read.** Writing it atomically, reserving before the call and settling after verification are AR5.
+
+**AR4b-2 status.** AR4b-2 adds §9.3a recovery from the remote history and post-publication verification for both paths, in simulation only. Production stays disabled, and recovery holds no send, push or execute.
+- **Reading the remote** (`publication_remote`). The history after the transaction's base is read oldest first from the remote itself, never from the attempt records, an API answer or the local clone:
+  - path A reads the in-memory `SimulatedGitHub`, standing in for GitHub's commit and activity records: parent, message, changed files, whether GitHub verified the signature and for which App, and the ref-update time;
+  - path B reads the `DisposableRemote` bare repository's own objects and its reflog. The disposable remote now logs ref updates, and a push records the simulation clock.
+
+  `main` that does not descend from the base (a root, a merge, an unreadable commit, more than 32 commits) halts as `halted_history_unverifiable`.
+- **Integrity** (`publication_integrity`, §9.3a 2a). Every check is `passed`, `failed` or `unavailable`:
+  - `ancestry`: one parent, the base;
+  - `signature_class`: on path A, GitHub verified the signature for the pinned App; on path B, the bot key the root lists, in the release namespace, at the commit's stated time. A key revoked since is judged as if not revoked here, because the revocation carries no time;
+  - `message`: the transaction's headline and body;
+  - `files`: exactly the proposed paths, each with its SHA-256;
+  - `manifest`: exactly one release file, named by its digest, binding this transaction's plan, batch, path and policy, and listing every other changed file;
+  - the manifest's bot signature stays `unavailable` (AR6) and is waived in simulation only.
+- **Authorization** (§9.3a 2b) is classified separately, as a judgement from evidence and never a proof. The owner's revocation and control records are evaluated as of a moment, by keeping only those signed by then:
+  - a key revoked in the trust root has no time, so the result is `authorization_unknown`;
+  - the policy not holding at the runner's `prepared_to_send` time is `unauthorized`;
+  - a missing attempt record or a missing remote event is `authorization_unknown`;
+  - otherwise the policy is evaluated at the event and at ±300 seconds: holding at all three is `authorized`, at none is `unauthorized`, and anything mixed is `authorization_unknown`.
+
+  The AR1 verdict, FC7b's pending blockers and the AR5/AR7 anchors are listed as waived and never passed.
+- **Receipts** (`publication_recovery_models`, `publication_receipts`, version `publication-receipt/1`). They are canonical, append-only and hash-linked, and bind:
+  - the transaction, attempt and manifest;
+  - the commit, its parent and the path;
+  - both verdicts with their checks and reasons;
+  - the classification.
+
+  They hold no time of their own, so recovering twice writes nothing. A receipt on record is re-derived, and one the remote contradicts is refused (`receipt_conflict`, latch set). Edited, reordered or truncated receipts are refused on read.
+- **Outcomes** (`publication_remote_recovery`):
+  - **nothing after the base:** `not_published`. An attempt left `prepared_to_send` or `outcome_unknown` is closed `refused`.
+  - **integrity verified:** the commit is recorded as published, with a receipt and a `published` attempt record. It is never resent; `execute` returns `unchanged` whenever a published receipt exists, even with the attempt records gone. It is counted once, through an idempotent AR3 ledger `commit` settlement that recovery plans and the caller appends.
+  - **any authorization but `authorized`:** the latch is set.
+  - **integrity failure** (`halted_integrity_failed`, or `halted_foreign_commit` for a commit not naming the transaction), **or any commit after ours:** the latch is set.
+
+  Recovery runs under STOP and under the latch, and clears neither.
+- **Races.**
+  - **A moving remote.** `main` is read before the history walk and again after it, an empty walk included. A `main` that moved meanwhile gives `halted_history_unverifiable` (`remote_head_moved_during_read`); one that cannot be read the second time gives `remote_main_unreadable`. Either way there is no receipt, no attempt is closed, and the latch is set.
+  - **Concurrent runs on one workspace.** Every execution (from authorization to its last record) and every recovery (from its first remote read through receipts, attempt records and the latch) holds `<workspace>/workspace.lock` by `flock`. A second holder is refused at once with `corpus_locked: workspace`, never queued, so it cannot deadlock; retried later, it finds the receipts already written.
+  - **Lock ordering.** The workspace lock is a leaf: nothing takes another lock while holding it, and the AR4a clone lock is never taken under it.
+
+Limitations:
+- **The two reads of `main` bound the walk; they are not an atomic snapshot.** `main` can still move after the final read and before the receipt is written, and GitHub offers no read that pins it. A pinned or conditional read, or matching the activity API, is AR7. Until then a move after the final read is caught by the next recovery, as a foreign commit after ours.
+- **The workspace lock is advisory and local.** It serializes processes that use it on one machine and one filesystem. It is not a distributed lock, and it does not stop the owner, who can write the private workspace directly.
+- **The ref-update times are simulated.** On path A they are the endpoint's `now`; on path B they are the reflog written with the simulation clock. Reading GitHub's activity API, with its retention limits [A, verify], belongs to the production transport (AR7 and later).
+- **Revocations in the trust root carry no time.** Any revoked key makes authorization unknown. Owner-signed, timed key revocations are AR5.
+- **Receipts and attempt records are local.** Anchoring them is AR5. The ledger settlement is planned, not written.
+
+**AR5a status.** AR5a adds durable, independently anchored control-plane state. It changes no AR1–AR4 behavior: the AR5 gates (`ar5_control_anchor`, `ar5_ledger_anchor`) stay unavailable until AR5 wires this evidence in.
+- **Record families covered:**
+  - `publication_attempts`, per transaction;
+  - `recovery_receipts` and the `stop_latch`, per workspace;
+  - the AR1b `budget_ledger`, per ledger;
+  - the owner's `control_history`, per policy;
+  - the AR3 `quarantine_ledger`, one canonical document.
+
+  The workspace families are read through the existing readers. The caller holds the bytes of the other three and passes them in. The records stay the source of truth.
+- **Control entries bind their signatures.** Each control entry is anchored as the record bytes together with the exact detached signature bytes, length-framed; a missing signature is framed as absent. Removing or replacing a signature therefore changes the head, and the state is no longer `verified`. Whether a signature is the owner's stays `verify_control`'s to judge: an anchored entry is never an authorized one.
+- **Anchor contract** (`control-plane-anchor/1`, `control_plane_anchor_models`). One canonical anchor binds:
+  - the family and its record schema;
+  - the repository, and the scope with its kind;
+  - the digest of the chain head, the record count and the last sequence;
+  - the anchor's own sequence and the digest of the anchor before it;
+  - `verification: verified`.
+
+  It is deterministic and holds no record content.
+- **Trust model.** An anchor counts only if an **anchor witness** outside the runner signed it:
+  - **Its own role.** The witness key holds a new trust-root role, `anchor_witness`, in the namespace `lovspor-forarbeider-anchor` only. A key holding that role together with the owner's or the bot's is refused, and neither an owner nor a bot key can sign an anchor.
+  - **Compare-and-swap.** The witness keeps one append-only chain per family and scope. It accepts an anchor only if it names the current head and the next sequence. It never replaces or removes an anchor, and never lowers a record count.
+  - **Verification.** The verifier checks every anchor against the trust root: signature, role, revocation and validity window. Hashes alone authenticate nothing.
+  - **Independence.** A witness located inside the workspace it anchors, or holding it, is refused (`store_not_independent`). A second file in the same workspace is never an anchor.
+  - **The offline witness** (`OfflineAnchorWitness`) has its own private directory and its own key, which never enter the workspace. It writes each anchor as a temporary file, flushes it, then links it to its final name. Writers are serialized by an `flock` on the witness's own lock file.
+- **Verification** (`control_plane_anchor.verify`):
+  - The local chain must have canonical bytes and intact hash links (`local_invalid`).
+  - The witness chain must be canonical, belong to this family and scope, be unbroken, never lower its count, and be witness-signed (`anchor_invalid`). An unreadable witness is `store_unavailable`.
+  - A caller's pin of the newest anchor it has seen must still be in the chain (`anchor_rolled_back`).
+  - Then the state is one of:
+    - `unanchored`: there is no anchor, even if the family is empty. A missing anchor is never a clean history; `initialize` anchors an empty family explicitly, once, and refuses existing records that have no anchor.
+    - `local_rolled_back`: fewer records than anchored (truncation, deletion, an older copy, a deleted stop latch, a withheld newest stop).
+    - `diverged`: an anchored head the records do not reproduce (substitution, a rewritten chain, a forked writer).
+    - `verified`: exactly the anchored records. Only this state is exposed, as `verified_state`.
+    - `pending_anchor`: exactly one record more than anchored.
+    - `unanchored_tail`: more than one record more than anchored.
+- **Crash safety** (`durable_append`, for the workspace families). It holds the workspace lock, verifies, appends through the existing writer, re-reads the chain, then anchors. An interruption:
+  - **before the append** leaves the state verified and unchanged;
+  - **after the append, before the anchor** leaves `pending_anchor`, which only a retry of the same record completes;
+  - **during the anchor update** leaves no partial anchor, so the state is `pending_anchor`;
+  - **after the anchor, before the acknowledgement** leaves the state verified, and a retry is `already_applied`.
+
+  `anchor_pending` anchors exactly one pending record. More than one halts.
+- **Lock ordering:** clone lock (AR4a, never under the workspace lock), then the workspace lock, then the witness lock, which is a leaf. AR4's execution and recovery never take the witness lock.
+
+Limitations:
+- **The offline witness is not a production authority.** Whoever holds its directory can roll it back. Then:
+  - a newer workspace shows as `pending_anchor` or `unanchored_tail`, never as verified;
+  - a consistent rollback of both the workspace and the witness is caught only by a caller's pin kept elsewhere.
+
+  An append-only production witness (for example a transparency log, or a protected remote) is AR7, together with a production signer for the witness key.
+- **Existing AR4 records have no anchors.** They are `unanchored`, and adopting them needs an owner decision (AR5).
+- **An anchored quarantine ledger cannot be succeeded yet.**
+  - Once a quarantine ledger is anchored, anchoring a different one is refused (`diverged`).
+  - A witness chain in which a second document follows the first is `anchor_invalid` (`quarantine_successor_unverified`), for both documents.
+  - Initializing an empty ledger and anchoring the first document still work.
+  - **Later integration (AR5).** A successor may be verified only when all of these hold:
+    - the predecessor's bytes reproduce the anchored head;
+    - AR3's `successor_findings(previous, current)` is empty;
+    - every clearance it relies on was re-verified under the owner's signed exceptions.
+
+    The proof must travel with the new anchor, so the verifier can check it.
+- **The ledger, control and quarantine writers are AR5.**
+- **Not in this PR:** wiring `verified_state` into the STOP/RESUME and budget gates, owner resume, and budget reservation and settlement (AR5).
+
+**AR5b status.** AR5b connects the AR5a anchors to STOP/RESUME and adds owner-authorized recovery from a stop. Simulation only. Production stays denied: in production `ar5_control_anchor` is still unavailable until AR7 provides a production witness, and `ar5_ledger_anchor` (AR5c), AR6 and AR7 are unchanged.
+- **Verified control state before authorization** (`publication_anchors`, check `ar5_control_anchor`):
+  - The verifier itself verifies three families against the witness: `control_history` for the plan's exact policy, the `stop_latch`, and the transaction's `publication_attempts`.
+  - Any state other than `verified` denies: missing, stale, rolled back, diverged, unavailable, or not independent. No simulation may waive this check.
+  - Nothing the caller passes counts as verified. The verifier also reads the latch from the workspace itself, not only from the adapter.
+  - **A STOP cannot be bypassed by offering older valid control records.** Once the STOP is anchored, withholding it is `local_rolled_back`.
+- **Sealed evidence never outlives a later STOP.** `publish_authorized` accepts evidence while it is fresh (120 s), but under the workspace lock and before `prepared_to_send` it re-reads the state the evidence was issued against:
+  - the latch in force is refused (`stop_latch_set`);
+  - a latch transition since the evidence is refused (`authorization_stale:stop_latch`); the evidence binds `stop_latch_head_sha256`;
+  - the owner records are verified again at the send time: a stop in force or a lapsed resume lease is refused (`stop_control:…`), and a control head other than the evidence's is refused (`authorization_stale:control_history`);
+  - the three anchored families are verified again against the witness (`anchor:…`).
+  - The latch is read once more right before the send. A refusal sends nothing and makes no network call. `execute` is unaffected: it authorizes fresh under the same lock.
+- **Appends are anchored.**
+  - Execution and recovery anchor every attempt record, receipt and latch transition they write.
+  - A denial is recorded only while the attempts verify. When the witness is down nothing unanchorable is written, and the denial still stands.
+  - A `prepared_to_send` that cannot be anchored is never sent.
+  - A recovery first completes any record a crash left unanchored.
+- **The latch is an auditable chain** (`<workspace>/stop-latch/NNNNNN.json`, `LatchEvent`):
+  - Transitions alternate `set` and `cleared`, are hash-linked and are never removed or replaced. A `cleared` names the owner RESUME it rests on, and the evidence that the cause was resolved.
+  - The AR4b-1 single-file latch reads as set for good, and nothing clears it.
+  - Execution, recovery and the bot never clear the latch.
+- **STOP** (`record_stop`):
+  - The newest owner record must be a STOP in force that `verify_control` accepts.
+  - The latch is set at once, even while the witness is down. The STOP record and the latch transition are anchored when the witness can.
+  - A STOP that is only offered also denies, through `stop_control`.
+- **Owner RESUME** (`resume`) clears the latch only when all of these hold:
+  - the newest owner record is a RESUME that `verify_control` accepts and that leaves the policy `not_stopped` (it names the stop it resumes, in that stop's scope, within its lease, with no later stop);
+  - it extends the anchored control history exactly;
+  - it was signed after the latch was set;
+  - the cause is resolved, by anchored attempts and receipts:
+    - no attempt is left at `prepared_to_send` or `outcome_unknown` (an unknown outcome needs AR4b-2 recovery first);
+    - every receipt is `published_authorized`;
+    - an unverifiable history or a receipt conflict is never resolved here;
+  - the `cleared` transition is anchored.
+
+  Refused: bot keys, forged signatures, another policy, a stale sequence, a replayed older history, a revoked owner key, a RESUME signed before the latch, a down witness.
+- **Ordering and crash safety.**
+  - STOP, RESUME, execution and recovery all hold the workspace lock, so they never interleave. The second of two concurrent calls is refused (`corpus_locked: workspace`) and decides nothing.
+  - An execution that holds the lock first completes. A STOP recorded after it denies every later execution.
+  - The only lock taken under the workspace lock is the witness's, which is a leaf.
+  - Crashes:
+    - after the STOP's latch is set, before its anchor: still stopped, and a retry anchors it;
+    - before the clearing: still latched, and a retry resumes;
+    - after the clearing, before its anchor: denied (`stop_latch:pending_anchor`) until a retry completes it.
+
+Limitations:
+- **Withdrawal after a halt is AR5c with the owner.** A foreign commit, a failed integrity check or an unverifiable history is never resumed here.
+- **The budget ledger anchor, reservation and settlement are AR5c** (see the AR5c status below).
+- **A STOP that is neither offered nor anchored cannot be seen.** Its effect starts once it is offered or recorded.
+
+**AR5c status.** AR5c anchors the budget ledger and settles every verified publication exactly once. Simulation only. Production stays denied: in production `ar5_ledger_anchor` is unavailable until AR7 provides a production witness; AR6 and AR7 are unchanged.
+- **Durable ledger** (`publication_ledger`, `<root>/<ledger_id>/NNNNNN.json`, outside every workspace, shared by them): the AR1b entries, created once, never replaced or removed, anchored as the `budget_ledger` family, scope `<ledger_id>`. A ledger several workspaces share names its own witness (`BudgetLedger.witness`); each workspace keeps its own witness for its workspace families.
+- **Consistency model.** Only a ledger whose chain reproduces exactly the witnessed head is read or extended. Every write: under the ledger lock, verify against the witness, judge the operation with `plan_entry` on that chain (next entry, `already_applied` for an exact retry, or a refusal), create the entry `O_EXCL`, read it back, anchor it. A crash between write and anchor leaves `pending_anchor`, which blocks the ledger until the **same** operation is retried: the retry proves the pending bytes are exactly what it would append and completes the anchor. A pending entry anything else wrote is never anchored.
+- **Before a simulation publishes:** `ar5_ledger_anchor` verifies the durable ledger against the witness, never waived. `budget` reads only the durable ledger: a reservation for exactly this transaction and batch, covering its usage, within the owner-signed limits and daily caps (AR1b). A missing ledger is never zero usage. Another release's open reservation, from any workspace, denies (`ledger_settlement_pending`). `publish_authorized` re-verifies, under the workspace and ledger locks it holds until the send has been recorded, the ledger anchor and this transaction's exact open reservation (not cancelled or settled, this batch, covering its usage, within the caps verified now, no other open reservation); sealed evidence never outlives its reservation (`authorization_stale:reservation:<why>`), and a cancel during the interval is refused (`corpus_locked: ledger`).
+- **Ledger-wide invariant: at most one open reservation.** A reservation is open until the ledger settles (`commit`) or cancels it. It may have been sent, so its outcome is unresolved for the whole ledger: while it is open no other release, from any workspace, reserves (`ledger_reservation_open`) or is authorized (`ledger_settlement_pending`). The rule reads only the witnessed ledger, under the ledger lock, never a workspace's records or a caller's flag.
+- **Reservation** (`reserve`): the transaction's exact usage for the day, anchored; a retry is `already_applied`; a conflicting reservation, another open reservation, an exceeded cap or unverified limits is refused and writes nothing.
+- **Settlement** (`settle`, from AR4b-2 recovery only): the workspace's whole receipt chain is read once and verified against the witness; the receipt settled is the chain's receipt with exactly the offered receipt's canonical bytes, never the offered object. It must name this transaction, its release manifest, its path and base, a pipeline commit whose parent is that base, and be the transaction's only published receipt in the chain (else `receipt_not_in_anchored_chain`, `receipt_<field>_mismatch` or `receipt_ambiguous`). It settles the single reservation under the same batch; the `commit` entry carries the batch's exact usage, the verified remote commit and the receipt's digest, and is anchored. A second settlement naming another commit or receipt is refused (`ledger_conflicting_settlement`). An API answer or an attempt record never settles. `published_authorization_unknown` and integrity failures are withheld: the reservation stays open and the latch stops the workspace.
+- **Locks.** Workspace lock, then the ledger lock (`<root>/<ledger_id>.lock`, across workspaces and processes), then the witness lock (a leaf). Nothing holding the ledger lock takes a workspace lock; the clone lock is never taken under either. A second holder is refused at once (`corpus_locked: ledger`).
+- **Crashes** (each a test): before the reservation (nothing written, denied); after its append, before its anchor (denied until the same reservation is retried); after the anchor, before the send (recovery: `not_published`, one send later); after the mutation, before the response (recovery settles once); after the receipt, before the ledger commit (the next recovery settles); after the ledger commit, before its anchor (the next recovery completes it); after the anchor, before the acknowledgement (the next recovery is `already_settled`, nothing more is charged).
+
+Limitations:
+- **Withdrawal after a halt and adopting pre-existing unanchored records remain open; quarantine successors: AR5d-4, below.**
+- **A withheld settlement is resolved by the owner** (AR5b RESUME does not settle it); its reservation keeps counting against the day.
+- **Settlement under revoked owner limits is refused**: the publication stays unsettled and spending stays blocked until the owner signs limits again.
+- **One open reservation per ledger serializes publication**: reserve, publish, settle, then the next batch. An abandoned reservation (reserved, never sent) blocks the ledger until it is cancelled; an owner-authorized cancel is not implemented here (AR5d-3 adds it, below).
+- **Workspace families shared one scope per witness** (`stop_latch` and `recovery_receipts` were scoped `workspace`, #1013): workspaces could not share a witness store for them. It failed closed (a collision is a rollback or divergence), and a shared ledger therefore names its own witness. AR5d-1 removes the collision (below); the ledger's own witness stays valid.
+
+**AR5d-1 status.** AR5d-1 gives each publication workspace an anchored identity and anchors the workspace families in its scope, so independent workspaces can share one witness store (#1013). Simulation only. Production stays denied; AR5c's ledger, settlement and reservation rules are unchanged.
+- **Identity contract** (`workspace-identity/1`, `workspace_identity_models`). One canonical, immutable record, `<workspace>/workspace-identity.json`:
+  - a random 256-bit `workspace_id`, drawn once;
+  - the `repository` and the publication `domain` (`forarbeider-publication`);
+  - the version and the creation time.
+
+  The path is not part of it. The scope of the workspace families is `workspace:` followed by the SHA-256 of the record's exact bytes, so the repository, the domain and the random id are bound into every anchor key.
+- **Trust model.** The record is a name, never a credential. It counts only once the witness has anchored it, as the one record of a new family, `workspace_identity`, in that same scope (`control_plane_anchor.workspace_scope`). Requests carry no identity: the verifier reads the file and asks the witness. Refused, with `workspace_identity:<why>` in `ar5_control_anchor`, and nothing sent:
+  - a missing file (`missing`);
+  - a link, a shared or hard-linked file, or a workspace that is not private (`unsafe`);
+  - unreadable or non-canonical bytes, another repository or domain (`unreadable`, `not_canonical`, `repository_mismatch`);
+  - a well-formed record the witness never anchored, such as a caller's claim (`unanchored`);
+  - an identity whose anchor is pending or rolled back at the witness (`pending_anchor`, `local_rolled_back`, …), or an unreachable witness (`store_unavailable`).
+- **Establishing** (`workspace_identity.establish`), under the workspace lock, with AR5a primitives only: anchor the empty family in the new scope, write the file once (a flushed temporary file hard-linked to the final name, never replaced), then anchor it as the family's one record. A crash before the write leaves no identity (the orphaned empty anchor names a random scope nobody holds); a crash after it leaves `pending_anchor`, which denies until a retry completes it; a retry after success is `already_established`. Leftover temporary files are removed under the lock first; a leftover hard link makes the identity `unsafe` until then. Only an **empty** workspace gets an identity (`workspace_not_empty`), and an identity file the witness does not hold is never registered again.
+- **Anchor isolation.** `stop_latch` and `recovery_receipts` (through `durable_append`, `publication_anchors`, STOP/RESUME, execution, recovery and the AR5c receipt binding) are anchored and verified in the identity scope. A latch set in one workspace never stops another on the same witness (tested both ways); STOP and RESUME read and write only their own workspace's latch, in its scope. Two things stay shared on purpose:
+  - `publication_attempts` stays per transaction. A transaction is content-addressed, so two workspaces attempting one transaction meet in one chain: that is the exactly-once guard, not a collision.
+  - `control_history` stays per policy: an owner STOP binds every workspace of the policy. The `budget_ledger` stays per ledger.
+- **Copies and relocation.**
+  - A moved workspace keeps its identity and its scope; the path never mattered.
+  - A copy, or the identity file copied into an empty workspace, is the **same identity**, and an identity has **one exclusive writer at a time** (below). The witness's compare-and-swap lets only one history continue: once either copy advances (a writer claim, an attempt, a receipt, a latch), the other is `local_rolled_back` or `diverged` and never re-anchored. Each case is a test, including the copy publishing first.
+- **One writer per identity** (`workspace_writer`, `workspace_writer_models`; review blocker on PR #1020). A copy has its own workspace lock, and attempts are scoped per transaction, so before this two copies could send two **different** transactions, each with its own reserved ledger and its own remote. Now every send first claims the identity's writer slot at the witness:
+  - a new family, `workspace_writer`, in the identity scope: an append-only chain of `claim` (random `claim_id`, transaction, attempt, time, lease end) and `release` records, anchored empty by `establish` before the identity file is written;
+  - `claim` requires the chain to be exactly the anchored one, the newest claim released or its lease (300 s) over, and time not running backwards; it appends the claim and anchors it through the witness's compare-and-swap. The anchored head is the fencing token: of two copies, one claim is anchored; the other is `anchor_head_moved`, `local_rolled_back` or `diverged`, whatever its transaction or ledger;
+  - right before the send, `require_current` proves the claim is still the anchored head with at least 60 s of lease left; a takeover is only possible after the lease, so a writer taken over never begins a send;
+  - the claim is released after the outcome is recorded, or when a check refuses before the send.
+
+  Writer exclusivity is told apart from, and tested separately from: same-transaction exactly-once (the attempt chain), budget serialization (a reservation per transaction), and remote expected-head protection (authorization's `remote_head` check and the remote's own `expectedHeadOid`).
+
+  Crashes: a claim appended but not anchored is `pending_anchor` and is anchored by the next claim; a claim anchored and never released holds every writer of the identity off until its lease ends, then exactly one claim takes over and the old holder is fenced (`local_rolled_back`); a release the witness missed is completed by the next claim. A removed writer chain is `local_rolled_back`, never restarted. No identity is regenerated.
+  - Another workspace's identity substituted into a workspace compares its chains with the other workspace's anchors, and is refused as soon as they differ.
+- **Legacy (pre-AR5d) workspaces and anchors.**
+
+  | Case | Behavior |
+  |---|---|
+  | Workspace with no identity | denied (`workspace_identity:missing`); nothing is written or anchored |
+  | Establishing on a workspace holding records, a latch or receipts | refused (`workspace_not_empty`); records, latch and legacy anchors untouched; no STOP is reset |
+  | Legacy anchors (scope `workspace`) | readable only through `legacy_verdicts`, read-only; never consulted for authorization |
+  | Legacy anchors copied under an identity scope | `anchor_invalid` (`anchor_foreign`): an anchor names its scope and is never reinterpreted |
+  | Nonempty family under a new identity | `unanchored`; `initialize` refuses existing records, so nothing is silently re-initialized |
+
+  AR5d-2 (below) decided that no populated legacy workspace is migrated. No anchors exist outside tests.
+- **Concurrency** (real processes): four processes establishing one workspace make exactly one identity (the others are refused `corpus_locked: workspace` or confirm it); two workspaces anchoring latches through one witness at once both verify; two processes publishing different transactions from two copies of one identity at once send exactly once, and the other is refused `workspace_writer:<why>`. Lock order is unchanged: workspace, ledger, witness (a leaf). Establishing takes no ledger lock.
+
+Limitations:
+- **A new workspace is a new writer.** An empty workspace with a fresh identity has empty families: a latch set in another workspace does not bind it. Workspace-wide halts belong to the owner's policy-scoped STOP; whether a halt in one workspace should block new identities for the repository is an owner decision (AR5d-2).
+- **The lease is a time bound, not a remote-side fence.** A send that begins with at least 60 s of lease left and outlasts it could overlap a takeover; the simulated remotes cannot check a fencing token. The expected-head check still refuses a second commit on one remote. A production remote and witness are AR7.
+- **The offline witness can be rolled back by whoever holds it** (AR5a). A truncated identity history shows as `pending_anchor`, which denies; `establish` then completes the same identity, never a new one.
+- **Migrating legacy workspaces is AR5d-2**, with the owner. Decided below: none is migrated.
+
+**AR5d-2 status.** AR5d-2 closes legacy workspace admission without a migration mechanism. Simulation only; production stays denied.
+- **Inventory.** No durable publication workspace, witness store or ledger exists outside tests:
+  - no CLI or deployment reaches `publication_execute`, `publication_remote_recovery`, `publication_stop_resume`, `publication_ledger` or `workspace_identity`;
+  - a search of the owner's machine (home directory, the external volume) found no `workspace-identity.json`, `stop-latch.json`, `stop-latch/`, `workspace-writer/` or `workspace.lock` outside pytest temporary folders;
+  - the hosted droplet runs the MCP server only.
+
+  Every legacy state (a workspace without identity, anchors under the literal scope `workspace`, historical attempts and receipts, the AR4b-1 `stop-latch.json`, pending anchors, quarantine and budget histories) is therefore a test fixture. **No migration framework is built.** If real legacy state appears, it stays denied until the owner decides.
+- **Policy.**
+  - A populated legacy workspace is never migrated, and its evidence is kept read-only.
+  - New identities come only from `establish`, only for an empty workspace.
+  - Historical records are never anchored under a new identity.
+  - STOP, pending outcomes and open reservations are never cleared silently.
+  - An ambiguous state stays denied.
+- **`establish` completes the identity.** Step 1 now anchors every family of the new scope empty (`stop_latch`, `recovery_receipts`, `workspace_writer`; `workspace_identity.SCOPED`), while the workspace is locked and provably empty. Before this, a workspace given its identity by `establish` alone was denied `stop_latch:unanchored`: the families were anchored only by the test rig, through the raw `initialize` primitive.
+- **Legacy evidence is never anchored as current** (`control_plane_anchor.legacy_evidence`, checked in `anchor_pending`, the one path that completes a pending record). Suppose an identity file is copied by hand next to legacy state. The legacy latch or receipt is then one record ahead of the new scope's empty anchor, so it reads as `pending_anchor`, just like a crash's record. Before this check, recovery or a durable append would anchor it: the copy took over the identity's latch, and the identity's own workspace became `local_rolled_back`. Now a record that the witness holds as a legacy head, under the literal scope, is refused (`anchor:legacy_evidence`) and stays pending, so the copy is denied. A legacy history that cannot be proved (unreadable, unsigned, unavailable) is never taken to mean there is none.
+- **A workspace without an anchored identity is read-only** (`publication_anchors.identified`), whenever a witness is given:
+  - a denied execution writes no attempt record and sets no latch. Before this, it appended a `denied` attempt and anchored it in the transaction's chain, which every workspace shares;
+  - recovery is refused (`workspace_identity:<why>`) before it completes a pending record, writes a receipt or attempt, or anchors anything.
+
+  An owner STOP is the one exception: `record_stop` still sets the latch locally (fail-safe; it can never be anchored there), and RESUME stays refused (`workspace_identity:missing`). Requests without a witness are AR4's: they anchor nothing.
+- **Admission matrix.**
+
+  | State | establish | execute / publish | recovery | STOP / RESUME | writer claim | ledger |
+  |---|---|---|---|---|---|---|
+  | Empty workspace | establishes; all families anchored empty | admitted | admitted | admitted | admitted | per ledger |
+  | Populated, no identity (legacy) | `workspace_not_empty`; nothing touched | denied (`workspace_identity:missing`); nothing written | refused; nothing written | STOP sets the local latch; RESUME refused | refused | cannot settle (no anchored receipts) |
+  | AR4b-1 `stop-latch.json` | `workspace_not_empty` | denied (`stop_latch_legacy_file`) | refused | refused | refused | n/a |
+  | Identity copied by hand next to legacy records | not called | denied (pending or tail at the witness); the identity's own workspace still publishes | runs; the legacy record is never anchored | latch stays pending | `local_rolled_back` once the original claims | n/a |
+  | Legacy anchors copied into an identity scope | n/a | `anchor_invalid` (`anchor_foreign`) | refused | refused | n/a | n/a |
+  | Missing, corrupt, forged or unanchored identity | refused with its reason | denied | refused | RESUME refused | refused | n/a |
+  | Another workspace's open reservation or attempts for the transaction | n/a | denied (`publication_attempts:local_rolled_back`); the ledger is unchanged | per remote evidence only | n/a | n/a | never cleared |
+
+- **Not covered** (an owner decision, below): a legacy record that the witness **never** anchored is indistinguishable from a crash's record, if someone copies an identity file next to it by hand. Records carry no identity, so only a schema change could tell them apart. The effect is bounded:
+  - a single such record can be completed under the copied identity;
+  - from then on the identity's own workspace is `local_rolled_back`, and is therefore denied;
+  - a latch so adopted only halts;
+  - a receipt so adopted is re-derived from the remote by every recovery, and halts on conflict.
+
+Owner decisions left open:
+- whether to bind workspace records to their identity (a new receipt and latch schema), so that even legacy records the witness never anchored can be refused;
+- what to do if a real legacy workspace is ever found: it stays denied until then;
+- a repository-level halt for new identities (from AR5d-1).
+
+**AR5d-3 status.** AR5d-3 lets the owner cancel an abandoned reservation, only on proof that nothing was ever sent, and keeps every withheld settlement withheld. Simulation only; production stays denied. Routine settlement stays automatic (AR4b-2 recovery, AR5c): nothing here asks the owner about a normal publication.
+
+- **One reservation's states** (the ledger and the transaction's anchored attempts together):
+
+  | From | Event | To | Who |
+  |---|---|---|---|
+  | none | `reserve` | open, never sent | automatic |
+  | open, never sent | `prepared_to_send` anchored (under the workspace and ledger locks) | open, sent | automatic |
+  | open, never sent | owner instruction and the proof below | **cancelled** | owner, AR5d-3 |
+  | open, sent | recovery: `published_authorized` | settled | automatic (AR5c) |
+  | open, sent | recovery: `not_published` | open, sent; a retried send is safe (the remote's expected head refuses a duplicate) | automatic |
+  | open, sent | recovery: authorization unknown, integrity failed, revoked limits, receipt conflict | open, withheld; the latch is set | automatic halt |
+  | open, withheld | an owner decision | not implemented: design below | owner |
+  | cancelled, settled | anything | terminal; never reserved again (AR1b) | — |
+
+  **"Open, sent" never becomes "cancelled".** After a send begins, an unchanged remote proves nothing: the request may still be in flight, its response may be lost, or its process may have died after the mutation. A timeout, a lapsed lease or a missing answer is never evidence of nonpublication. Such a reservation is resolved by recovery, and a retried send if need be.
+- **Trust boundaries.**
+  - Trusted: the owner key (control namespace, owner role, trust root) and the witness (AR5a).
+  - Verified here, never trusted: everything the caller passes, every workspace record (attempts, receipts, writer claims, identity), the ledger and the remote.
+  - **The authoritative attempt history** (review fix): a transaction reserved in a ledger has one attempt history, anchored on the ledger's witness, the witness that anchors its reservation (`publication_anchors.attempts_witness`). A workspace that keeps its own witness for its own families (identity, latch, receipts, writer, control history; AR5c) still anchors the transaction's attempts there. A send begins only once its `prepared_to_send` is anchored on that witness (AR4b-1), so a writer that cannot anchor there, because the witness is unavailable or because it names another one, never sends. The cancellation reads the same history: nothing a caller names about witnesses is compared, and a substituted ledger witness holds no anchored ledger, so step 7 refuses.
+- **The proof** (`publication_cancel.cancel_reservation`), all read under the workspace lock, then the ledger lock, then the witness (a leaf), and held until the last write:
+  1. the workspace identity is the anchored one (AR5d-1);
+  2. the instruction verifies (below) and binds this repository, ledger, transaction, batch, path, base and identity scope;
+  3. the transaction's attempts are read on their authoritative witness, the ledger's (above), where every sender of the transaction, on whatever witness its own families are kept, must anchor its `prepared_to_send` before sending;
+  4. the transaction's attempts verify against that witness and hold no `prepared_to_send`, `outcome_unknown` or `published` (`cancel:send_initiated:<state>`); their head is the one the owner signed. A copied workspace, or another workspace, on any witness, that began a send, is `local_rolled_back` or `diverged` there (`cancel:anchor:publication_attempts:<status>`);
+  5. no receipt for the transaction is in the anchored receipt chain (`cancel:receipt_on_record`);
+  6. no writer of the identity can be live: the writer chain verifies, and its newest claim is released or lapsed (`cancel:workspace_writer:claim_held`). The lapse only shows that the writer can no longer begin a send; step 4 shows that none began;
+  7. the ledger verifies against its witness; its head and the reservation's bytes are the ones the owner signed; the reservation is open and names this batch (`instruction_stale:ledger_head`, `instruction_reservation_mismatch`, `reservation_not_open`);
+  8. the remote `main` is the base, read before and after the walk (`cancel:remote_advanced`, `cancel:remote:<why>`).
+- **Writes.**
+  1. A `refused` attempt record carrying `reservation_cancelled_by_owner` and the instruction's digest, anchored for the transaction. It is the durable decision and a fence: `execute` returns `refused`, and `publish_authorized` refuses (`reservation_cancelled`), without sending.
+  2. The AR1b `cancel` entry, appended and anchored through the ledger's own write path.
+
+  `publication_ledger.record` now refuses a `cancel` (`ledger:cancel_needs_owner_instruction`). The cancellation clears no latch and no STOP, settles nothing and permits no publication.
+- **Owner instruction** (`ReservationCancellation`, namespace `lovspor-forarbeider-control`, its own record type and domain):
+  - Binds: the operation (`cancel_abandoned_reservation`), repository, ledger id, transaction, batch, path, base commit, the reservation entry's SHA-256, the ledger head's SHA-256, the attempts head's SHA-256 (or none), the identity scope, a reason, an instruction id, the signer, `signed_at` and `valid_until` (at most 24 hours later). There is no wildcard.
+  - Refused: an unlisted key, a bot key (it cannot hold the namespace), another namespace, a STOP or other record offered in its place, expired, signed after the check time, valid for more than a day, or bound to anything else.
+  - Stale: evidence that changed after signing (ledger head, attempts head).
+  - Replay: the same instruction completes or finds its own cancellation (`already_cancelled`). Another instruction for a cancelled reservation is refused. An instruction cannot apply elsewhere: it binds one reservation, and a cancelled release is never reserved again.
+- **Races.**
+  - Send against cancellation, in-process and across processes, from this workspace, from another on the same witness, or from one on its own witness sharing the ledger: both hold the workspace lock (same workspace) or the ledger lock (shared ledger) from their first check to their last write. The second is refused (`corpus_locked`); then it finds the first one's records (a cancellation fences the send; a begun send refuses the cancellation).
+  - Sealed evidence issued before a cancellation never sends (the fence, then AR5c's reservation recheck).
+  - Copied identities: step 4 above, and AR5d-1 writer fencing.
+  - **Remote mutation between the check and the cancel entry.** Only a send of this transaction could publish it. Every send anchors `prepared_to_send` first, under the ledger lock this cancellation holds, and step 4 proved that none exists. So no request for it exists anywhere, and none can start once the reservation is cancelled. A foreign commit in that interval is not this transaction's: the next recovery halts on it. No atomic remote read is needed, because no sender exists.
+- **Crash matrix** (each a test, both paths). In every case nothing is sent before the retry, the retry ends `cancelled` or `already_cancelled`, and there is exactly one decision record and one anchored `cancel` entry.
+
+  | Crash point | State left | Retry |
+  |---|---|---|
+  | during the remote verification | nothing written | proves again, cancels |
+  | after the decision record, before its anchor | attempts `pending_anchor`; a send is denied | completes the anchor, cancels |
+  | after the anchor, before the ledger entry | the reservation is still open, and the fence stops every send | appends the entry |
+  | after the ledger entry, before its anchor | ledger `pending_anchor` | completes it (the same operation) |
+  | after the anchor, before the acknowledgement | done | `already_cancelled` |
+
+- **Withheld settlement: unchanged, and never cancelled.** A transaction that was published, or whose outcome is unknown, is refused by step 4 or 5. Its reservation stays open, so it keeps counting against the day, and the latch keeps the workspace stopped:
+  - `published_authorization_unknown`;
+  - an integrity failure;
+  - revoked owner limits (nothing can be appended under unverified limits, a cancel included);
+  - a conflicting receipt;
+  - an unknown remote outcome.
+
+  The four facts stay apart:
+  - A, what happened remotely: the receipt;
+  - B, whether it was authorized: the receipt's classification, never rewritten;
+  - C, budget: the open reservation;
+  - D, further publication: the latch and STOP.
+
+  No owner signature relabels B.
+- **Why exceptional accounting is a design, not code.** Closing a withheld reservation means recording budget consumed by a publication that was not proved authorized. The v1 ledger can say this only as a `commit`, which `verify_ledger` reads as a routine settlement (`settled`). A reader of the ledger alone could not tell an owner exception from a verified, authorized publication. The entry also cannot name the owner instruction: every field is in the canonical bytes, so adding one changes every entry. Revoked limits are worse: each entry binds the limits' digest, so new limits make the whole ledger fail replay (`ledger_limits_mismatch`). **Bounded proposal (ledger schema v2, owner decision):**
+  - a `consume` operation, distinct from `commit`, naming the receipt's digest, its classification as recorded, the owner instruction's digest and the basis `owner_exception`. It closes the reservation at the batch's exact usage, and `verify_ledger` reports it apart from settled usage;
+  - an owner instruction `account_withheld`, bound like the cancellation to one receipt and one reservation, which neither relabels authorization nor clears a latch;
+  - RESUME unchanged: an unknown or unauthorized receipt still blocks it until a separate owner decision (acknowledge, or withdraw forward-only);
+  - ledger succession under new limits: a new ledger whose first entry names the predecessor's head and carries its open reservations over;
+  - (no longer needed: the review fix anchors every reserved transaction's attempts on the ledger's witness, which makes every begun send of a shared ledger visible wherever it is cancelled.)
+
+Limitations and remaining blockers:
+- **Closed by the review fix: a sender on another witness.** Before it, AR5c let a workspace anchor a reserved transaction's attempts on its own witness, so a cancellation on the ledger's witness could not see that sender's `prepared_to_send` (reproduced red: an in-flight send from such a workspace was cancelled). The attempts now live on the ledger's witness; the earlier mitigation (`cancel:ledger_witness_not_workspace_witness`, an owner confirmation of the topology) is removed. Residual: a sender that bypasses `execute` altogether and talks to the remote directly is outside every AR5 control; its publication after a cancellation is never settled and sets the latch (tested).
+- **Trusted, not proved:** the witness. One that drops or forks a family's anchors (AR5a: whoever holds the offline store can roll it back) could hide a `prepared_to_send`; a production witness is AR7.
+- Withheld settlements, revoked limits and ledger succession stay blocked until the owner decides on the v2 design.
+- The decision record lives in the canceller's workspace. The ledger's `cancel` entry does not name the instruction (v1 schema).
+- Not in this PR: a global halt, owner cancellation of a sent reservation, quarantine successors, AR6 and AR7.
+
+**AR5d-4 status.** AR5d-4 adds anchored, independently re-provable successors of the AR3 quarantine ledger. Simulation only; production stays denied; nothing clears a quarantine automatically.
+
+- **Before.** AR5a anchors the ledger as one document (`quarantine_ledger`). A changed document is `diverged` and can never be anchored; a signed anchor over another document is `anchor_invalid` (`quarantine_successor_unverified`). That family is unchanged: an old anchor never authorizes a changed document.
+- **New family** `quarantine_succession` (`forarbeider_quarantine_succession/1`, scope = ledger id), anchor schema unchanged (`control-plane-anchor/1`). Its records are `QuarantineSuccession` entries in `<root>/<ledger_id>/NNNNNN.json`, created once (AR5c storage primitives), linked by the digest of the entry before. Each entry carries:
+  - the predecessor's digest (and, for a first entry continuing a `quarantine_ledger` document, that document);
+  - the successor document and its digest;
+  - the exact signed owner exceptions and revocations it relies on (record bytes and detached signature), the policy digest they were judged under, and the judgement time.
+- **The proof of one transition** (`quarantine_succession.transition_reasons`), replayed by every reader and by the writer before it writes, with the real AR3 engine:
+  1. the predecessor's digest is the one named; both documents are canonical AR3 ledgers;
+  2. `successor_findings` is empty: no record dropped, no history rewritten, no exclusion dropped (AR3 has no justified removal, so none is accepted);
+  3. the named policy is one the reader holds, by digest (`policy_unavailable`);
+  4. `verify_exceptions` re-verifies every carried exception and revocation against the **reader's** trust root at the judgement time; a signature failure fails the proof (`exception:quarantine_exception_untrusted`), so a key revoked later fails every later read;
+  5. every new `cleared` event names a carried, verified clearance that `clears` the record as it then stood (policy, version, evidence, target); every new exclusion names a verified exclusion of that document (`unjustified_clearance`, `unjustified_exclusion`);
+  6. the successor is a fixed point of `settle` under exactly those exceptions (`not_settled_under_the_verified_exceptions`): a stored `cleared` without a verified clearance is never accepted;
+  7. time does not run backwards (`clock_regressed`, `event_after_the_judgement`).
+- **Genesis.** A first entry either starts from the empty ledger, which requires that `quarantine_ledger` holds no document for the scope (verified empty or unanchored), or continues the document anchored there, which must be `verified` with exactly that document. A document anchored there after the chain began breaks the chain (`genesis:quarantine_ledger:local_rolled_back`): it is never silently adopted, and anchored history is never discarded.
+- **Reading** (`read_quarantine`): the chain must be `verified` against the witness (a pending entry is untrusted), the genesis must agree, every transition is replayed. Anything else refuses (`quarantine_succession:<why>`).
+- **Writing** (`append_successor`), under the store lock (a leaf above the witness lock; no workspace or budget-ledger lock is taken):
+  1. read and verify the chain; anchor an unanchored, empty chain empty first;
+  2. the caller's expected predecessor must be the verified head (`predecessor_not_the_anchored_head`): one successor per anchored predecessor; the same successor again is `already_applied`;
+  3. prove, create (`O_EXCL`), anchor; the witness's compare-and-set refuses a competing anchor.
+- **Crash and race matrix** (each a test):
+
+  | Case | Result |
+  |---|---|
+  | crash before the create | nothing written; retry `appended` |
+  | crash after the create, before the anchor | `pending_anchor`: readers refuse; a different successor or another time is `pending_entry_is_another_successor`; the exact retry `completed`, then `already_applied` |
+  | two processes, two successors of one predecessor | exactly one `appended`; the other `corpus_locked: ledger` or `predecessor_not_the_anchored_head` |
+  | a copied store adds a competing successor | `anchor:local_rolled_back` |
+  | witness unavailable | `anchor:store_unavailable`, nothing written; readers refuse |
+  | witness rolled back | readers refuse (`anchor:pending_anchor`) |
+  | local entry deleted, edited or truncated | `anchor:local_rolled_back`, `anchor:local_invalid`, `store:ledger` |
+  | an entry the witness signed but whose proof fails | `entry_<n>:<reason>` on every read |
+  | a fresh process with only the files, the witness and the trust root | proves the same head |
+
+Limitations:
+- The witness is trusted, not proved (AR5a): one that drops or forks anchors could hide a successor; a production witness is AR7.
+- The writer needs every policy the chain's entries name, to replay them (matched by digest, never trusted).
+- No AR3 path removes a quarantine record, so no justified removal exists; an owner decision would be needed to add one.
+- `run_quarantine` still takes the previous ledger's bytes from its caller, for independent AR3 use; the publishing pipeline reads quarantine only through `read_quarantine` since the AR5 integration gate (below).
+- A global halt, AR6 and AR7 are not in this PR.
+
+**AR5 integration gate status: partial integration, AR5 is not complete.** The publishing pipeline no longer trusts a caller's quarantine *ledger bytes*: it reads the head of an anchored AR5d-4 chain, and every anchor is verified under the request's one trust root. It does **not** yet know *which* anchored chain is the publication's: the caller still names the chain, so a properly anchored foreign chain can still be substituted in simulation (#1037, open, blocked on AR7). Simulation only; production stays denied; no flag is enabled.
+
+- **Before.** The planner, AR4a preparation and authorization accepted any `QuarantineEvidence` carrying the in-process `quarantine_assessment` seal. `run_quarantine` issues that seal over whatever ledger bytes its caller offers, so neither the AR5d-4 chain nor its witness was ever required. Reproduced on `7fbfedae`:
+  - a document the anchored chain quarantines was sent (paths A and B);
+  - a pending successor was ignored;
+  - evidence issued before a successor was spent after it;
+  - a witness authority under a second trust root was accepted.
+- **Adapter** `publication_quarantine` (no change to AR3, the planner or the metrics):
+  - `witnessed_quarantine` reads the head only through `read_quarantine` (the chain is `verified`, its genesis agrees, and every transition is replayed). It then verifies the head entry's carried owner exceptions **now**: `clock_regressed`, `exception:<halt>` (e.g. a signing key whose window has since closed), and `clearance_not_current` (`settle` is not a fixed point now: lapsed or revoked).
+  - `plan_witnessed` refuses a caller ledger (`caller_ledger_refused`). It runs AR3 on the anchored head with the head's exceptions and those offered. It plans only when the run leaves the head unchanged; otherwise it returns `successor_required` with the successor and the material for `append_successor`. A lapsed clearance is reinstated through that successor, never honoured.
+  - `prepare_witnessed` runs AR4a only after that binding holds now.
+  - `quarantine_reasons` binds the sealed assessment's and the sealed plan's quarantine digests to the anchored head's set, and the head's policy digest to the plan's policy.
+- **Authorization.**
+  - New check `ar5_quarantine_anchor`: never waivable in simulation; in production `unavailable` (`quarantine_anchor_production_witness_ar7_pending`).
+  - It reads the chain on the ledger's witness, when the ledger names one, as the attempts are (AR5d-3).
+  - `trust_root` also requires the witness authority's root to be the request's (`anchor_trust_root_not_the_requests`).
+- **Before the send** (`_still_current`, under the locks):
+  - the trust roots are the evidence's (`authorization_stale:trust_root`);
+  - the anchored head is still the evidence's (`authorization_stale:quarantine:<why>`).
+  - The chain's lock is held from the authorization to the outcome record. Lock order: workspace, budget ledger, quarantine chain, witness. `append_successor` takes only the last two, so no successor is anchored between the final check and the send, and no send starts while a successor is written (`corpus_locked: ledger`).
+- **Forged control records** (found by the gate's audit, reproduced on `7fbfedae`):
+  - **#1027.** `publication_anchors.settle` anchors a pending latch `cleared` event only on proof (`clearing_reasons`):
+    - it names the newest record of the request's owner control history;
+    - that history verifies at the clearing's time as a RESUME that leaves the policy not stopped;
+    - that history is itself anchored;
+    - the RESUME was signed after the `set` it clears.
+    A hand-written clearing stays `pending_anchor`, so recovery and `resume` never adopt it and the send is denied.
+  - **#1028.** The cancellation resume path accepts its decision record only when it directly follows the attempts head the owner signed, with no `prepared_to_send`, `outcome_unknown` or `published` before it (`cancellation_record_not_the_owners`).
+  - **#1029.** The owner's control history is verified and anchored on its authoritative witness: the ledger's, when the ledger names one (`control_authority_of`), as the attempts are (AR5d-3). A STOP recorded from any workspace sharing the ledger binds every other one, and a workspace on another witness that withholds the head is denied (`control_history:local_rolled_back`).
+    - Default chosen for the owner to confirm or reject in review. The alternative, one pinned control witness per repository, needs AR7's pin.
+- **Bootstrap.** Each operation is explicit and runs once; none adopts or resets a history.
+  - `initialize_quarantine` anchors one ledger's empty chain, explicitly and once.
+  - It refuses entries on disk, an anchored chain (`already_anchored`) and a document anchored under `quarantine_ledger` (`genesis:quarantine_ledger:<status>`); such a document is continued by the first `append_successor`.
+  - Without it, readers refuse `anchor:unanchored`: a fresh deployment cannot publish until the owner bootstraps.
+  - `publication_anchors.initialize_attempts` anchors one transaction's empty attempts on their authoritative witness (the ledger's, AR5d-3). Records on disk or an anchored chain refuse it.
+  - `publication_ledger.initialize_ledger` anchors one budget ledger's empty chain on its witness. Entries or an anchored ledger refuse it.
+  - `publication_anchors.initialize_control` anchors one policy's empty control history on its authoritative witness. Any anchored chain refuses it. `sync_control` then anchors the owner's records.
+  - The test rig now bootstraps through these operations.
+
+| Component | Authority | Verified at | Failure mode | Tests | Status |
+|---|---|---|---|---|---|
+| Quarantine membership | AR5d-4 chain on the ledger's witness, owner exceptions re-verified now | `plan_witnessed`; `authorize` (`ar5_quarantine_anchor`); `_still_current` | refuse or deny; `successor_required` | `test_forarbeider_quarantine_integration` | fixed here |
+| Planning and batch preparation | the anchored quarantine head | `plan_witnessed`, `prepare_witnessed` | `successor_required`; refuse, nothing staged | `test_forarbeider_quarantine_integration` | fixed here |
+| Quarantine source identity | none trusted: the caller names the chain (`ExecutionRequest.quarantine`, `Witnessing`) | nowhere | a valid foreign chain on the same witness and root governs planning, preparation and the send (reproduced: paths A and B, one workspace and both shared-ledger configurations) | `test_forarbeider_quarantine_source`: the reproductions strict `xfail`, the publication's own chain pinned in every legitimate configuration, an id shown not to identify a store | **open blocker #1037: owner confirmed the stop; the binding waits for the AR7 pin contract below** |
+| Anchor trust root | the request's trust root | `authorize` (`trust_root`); `_still_current` | deny; `authorization_stale:trust_root` | same | fixed here |
+| Plan, policy approvals, limits | owner signatures, trust root | `authorize` | deny | `test_forarbeider_publication_execute` | existing |
+| STOP/RESUME, latch | owner records anchored on the ledger's witness; latch anchored, a clearing only on an anchored owner RESUME | `authorize`, `_still_current`, `settle` | deny; latch; clearing `pending_anchor` | `test_forarbeider_publication_stop_resume`, `_stale_authorization`, `_forged_control_records` | #1027 and #1029 fixed here |
+| Workspace identity, writer | anchored identity and writer chain | `authorize`, `claim`, `require_current` | deny; refuse | `test_forarbeider_workspace_identity`, `_workspace_writer` | existing |
+| Attempts, receipts | anchored on the ledger's witness (AR5d-3) | `execute`, recovery | `recovery_required`; latch | `test_forarbeider_publication_remote_recovery`, `_recovery_races` | existing |
+| Budget ledger | durable, anchored | `authorize`, `_still_current` | deny | `test_forarbeider_publication_ledger` | existing; ledger identity unbound to limits: ledger v2 |
+| Cancellation | owner instruction and proof; a resumed decision bound to the signed head | `cancel_reservation` | refuse | `test_forarbeider_reservation_cancellation`, `_cross_witness_cancellation`, `_forged_control_records` | #1028 fixed here |
+| Bootstrap | the owner's explicit operation | `initialize_quarantine`, `initialize_attempts`, `initialize_ledger`, `initialize_control` | refuse any existing history | `_quarantine_integration`, `_forged_control_records` | fixed here (quarantine, attempts, ledger, control history) |
+
+Remaining gaps, classified:
+- **Fixed here:** #1027, #1028 and #1029 (above), and the bootstrap of every family: quarantine, `publication_attempts`, `budget_ledger` and `control_history`.
+- **Owner confirmation:** #1029's witness choice (the ledger's) is a default, to be confirmed or rejected in review.
+- **#1037, quarantine source identity: open, an AR7 dependency.** The owner chose an owner-signed `PublicationSourceBinding v1` (not ledger v2), then confirmed the stop: the missing pin is an AR7 contract, not a guard to work around in AR5. No anchor v2, pin store or binding is implemented here.
+  - **What stays possible, in simulation only.** A second quarantine chain, initialized and anchored on the same witness under the same repository and trust root, passes `plan_witnessed`, `prepare_witnessed`, `ar5_quarantine_anchor` and the check before the send, and the batch is published although the publication's own chain quarantines a document of it. Nine strict `xfail` reproductions in `test_forarbeider_quarantine_source` pin this (paths A and B; one workspace and both shared-ledger configurations; planning, preparation and the send). Each turns the suite red the moment a binding lands.
+  - **Why production cannot publish through it.** `Production` carries no transport, remote or signer. Its authorization is denied (`ar5_quarantine_anchor` is `unavailable`, `quarantine_anchor_production_witness_ar7_pending`, and never waivable), and `publish_authorized` refuses any non-`Simulation` environment (`production_execution_disabled`) before the final check. No CLI command, workflow or `sync.yml` step calls the publication pipeline, and `PublicationSettings.source` is fixed at `unverified_ar7_pending`. `test_production_never_sends_through_a_foreign_chain` substitutes the foreign chain under `Production()` in every legitimate configuration: denied, the remote unchanged.
+  - **Why an identifier binding would be a sham.** Every anchor is accepted when any key holding `ANCHOR_NAMESPACE` in the trust root signed it (`control_plane_anchor`, the anchor signature check), and anchors are deterministic. So a second witness store under the same key and root anchors a chain with the publication's own ledger id and other content, and both verify (`test_a_chain_id_alone_never_identifies_the_source`). The legitimate multi-witness configurations are exactly such stores. A signed binding of ids, or a binding anchored on whichever witness the caller names, would therefore be satisfied by a substitute, or rolled back to an older binding on a fresh store.
+  - **Minimal bootstrap contract (proposed, not implemented):**
+    1. **One designated binding authority.** The trust root gives a dedicated witness key the new namespace `lovspor-forarbeider-binding-anchor` (no change to the trust-root format, only a new namespace on one signer line). The same trust as AR5a: this key keeps exactly one history and never serves a second store. Workspace witnesses keep their own keys and stores, so multi-witness setups stay legal.
+    2. **The record.** `PublicationSourceBinding v1`, owner-signed (owner role, its own namespace `lovspor-forarbeider-source-binding`). It names: repository, publication domain, `policy_id` and the policy digest, the budget ledger id, the quarantine ledger id, `sequence`, the previous binding's digest (none for the first), `signed_at`, `valid_from` and `valid_until`.
+    3. **Anchoring.** Family `publication_source_binding`, scope = the repository (never an id the caller picks), anchored only under the binding namespace. `initialize_binding` is the owner's explicit one-time operation and refuses any anchored or on-disk history. A change is the owner signing sequence n+1 over the head's digest, appended under the witness's compare-and-set. Readers trust only the verified head: pending, rolled back, diverged, expired or not-yet-valid denies. Nothing resets or adopts a history.
+    4. **One authority for the bound families.** The budget ledger and the quarantine chain the binding names must be verified on the binding authority (with the attempts and control history, which already follow the ledger's witness). Without this, the same-id substitute above still passes.
+    5. **Where it is checked.** `plan_witnessed`, `prepare_witnessed`, authorization (a new, never-waivable `ar5_source_binding`, its head digest sealed into the evidence) and the final check before the send (`authorization_stale:source_binding`). The checks: the binding names the settings' repository, the plan's policy, `request.ledger.ledger_id` and the source's `ledger_id`, and the ledger and chain are anchored on the binding authority. Any other source, or another budget/quarantine pair, is refused. No per-publication manual approval.
+  - **Owner decisions (second round):** (a) a dedicated binding witness with an independent, trusted pin of its history; "one key, one store" alone is not enough, the bootstrap is explicit, and a second store under the same key is detected. (b) Yes: the binding, the budget ledger and the quarantine succession are verified on the binding authority, and workspaces keep their own witnesses. (c) Owner namespace `lovspor-forarbeider-source-binding`, witness namespace `lovspor-forarbeider-binding-anchor`. A pin kept next to the witness, or an operational assumption, does not count.
+  - **Stopped: AR5 has no independent, durable, updatable pin.** Evidence:
+    - `AnchorPin` is "the newest anchor a caller has seen". The caller holds and passes it, and no execution path supplies one.
+    - `ENGINE_TRUST_ROOT_SHA256` is the only pin independent of the request. It is a constant updated by an owner-merged release, fit for static data but not for a witness history that grows with every anchor. The shipped trust root holds no keys.
+    - `control_plane_witness`: the offline witness "cannot prove that its directory was not rolled back"; append-only on its own authority is AR7. `test_a_witness_and_store_rolled_back_together_read_the_old_head_as_verified` shows it: both directories restored together read the older head as `verified`.
+    - `control-plane-anchor/1` carries no store identity and is deterministic, so a second store under the same key and root is indistinguishable (`test_a_chain_id_alone_never_identifies_the_source`).
+  - **The AR7 contract #1037 needs** (precise; everything else in the bootstrap contract above is implementable in AR5 once it exists):
+    1. **Log identity.** The binding witness is an append-only log with an identity: a log id (the digest of its public key and a genesis nonce the owner chooses at bootstrap). Every anchor it issues (anchor schema v2) names the log id, a strictly increasing tree size and the root hash of the log at that size, inside a signed checkpoint. A second store under the same key has another genesis, so another log id, and is refused by identity, not by content.
+    2. **Independent checkpoint pin.** The verifier trusts a checkpoint only against a pin held outside the request, the workspace and the witness's own directory:
+       - the log id and key ship in the engine-pinned trust root (`ENGINE_TRUST_ROOT_SHA256`), changed only by an owner-merged release;
+       - the newest checkpoint the verifier has accepted (log id, tree size, root hash) lives in a durable pin store owned by the verifier's host, writable only by the verifier and readable by the owner.
+       A caller-held `AnchorPin`, a pin file next to the witness, or an operational assumption does not satisfy this.
+    3. **Update only on a consistency proof.** The pin advances from (n, root_n) to (m, root_m) only when m ≥ n and the witness supplies an RFC 6962-style consistency proof that verifies between the two roots. The pin is written with compare-and-set on its previous value, so two verifiers never fork it. Nothing else moves it.
+    4. **Rollback protection.** A checkpoint with a smaller tree size than the pin, the same size with another root, a failed or missing consistency proof, or another log id is a rollback or a fork: refused, and the refusal latches the publication until the owner acts. Restoring the witness and the store together (`test_a_witness_and_store_rolled_back_together_read_the_old_head_as_verified`) is caught because the pin is not restored with them.
+    5. **Trusted bootstrap.** No trust-on-first-use. The owner creates the binding log, records its log id and key in the trust root, and merges that release. `initialize_binding` then anchors binding sequence 1 (owner-signed) once and writes the first pin from the release, not from what the witness says. Successors are owner-signed sequence n+1 over the head's digest, appended under the witness's compare-and-set, and adopted only when the pin advances by a consistency proof. A trust-root change of the binding log is an owner release with a signed hand-over from the old log's last checkpoint. Nothing resets or adopts a history.
+    6. **Behaviour when unavailable.** Fail closed at every one of the four checks:
+       - the witness unreachable, no consistency proof, the pin store unreadable or locked, or a pin from another log: planning and preparation refuse, authorization denies (`ar5_source_binding` failed, never waivable), and the check before the send denies with nothing sent;
+       - an attempt already `prepared_to_send` goes to recovery, as an unavailable anchor does today;
+       - no fallback to the last-seen head, a cached binding or the caller's chain, and no grace period.
+       Production stays denied until a production witness and pin store exist (AR7).
+  - With that contract in place, AR5 adds the record, the `publication_source_binding` family and the four checks (planning, preparation, `ar5_source_binding`, before the send). Without it, any binding guard would be the sham the owner ruled out.
+  - The 9 substitution reproductions stay strict `xfail`, the explicit open #1037 blocker, until the AR7 contract lands and the binding is built on it.
+- **Production-only (AR7):** the witness pin, a production witness and an unpinned trust root (FC7b). `AuthorizationInputs.ledger` is read only without a durable ledger, which simulation denies.
+- **Ledger v2 / exceptional accounting:** ledger identity bound to the owner-signed limits; anchored policy and limits revocations.
+- **AR4a at the publishing boundary.** `prepare_witnessed` chooses a batch's membership only once the sealed assessment and the sealed plan are proved to be the anchored head's quarantine now (`quarantine_witness:prepare:<why>`, nothing cloned or staged). The raw AR2 planner (`plan_release`) and AR4a `prepare_publication` stay as they are for independent use, as `run_quarantine` does for AR3. The publishing pipeline enters through `plan_witnessed` and `prepare_witnessed`, and nothing prepared from another quarantine can be authorized or sent (`ar5_quarantine_anchor`, the final check).
+
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 
 **Rollback:** the stop file, then revoking the policy, then revoking the credential. Published commits are withdrawn forward only (§9.7).

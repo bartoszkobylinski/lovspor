@@ -503,7 +503,11 @@ class TestPerMutantTimeLimit:
     (mutmut 3.8.0 `workers/isolation.py:875`), and `estimated_time` sums only the
     pytest `call` phase. On PR #395 two real survivors ran out of the default
     limit: 0.71 s call phase, 4.75 s setup+teardown, 6.3 s wall locally,
-    limit (0.71 + 1) * 15 ≈ 25.7 s. The constant carries the setup time."""
+    limit (0.71 + 1) * 15 ≈ 25.7 s. The constant carries the setup time.
+
+    Issue #975 (owner decision 2026-11-20): a mutant that never ends waits out
+    the whole limit, 17 min at (62 + 7) * 15. The multiplier came down to 4 and
+    the constant went up to 30, which keeps the #423 margin."""
 
     PR_395_CALL_SECONDS = 0.71
     DEFAULT_LIMIT_SECONDS = (0.71 + 1.0) * 15.0
@@ -521,7 +525,7 @@ class TestPerMutantTimeLimit:
                 reset_config()
 
     def test_the_repo_pins_the_timeout_values(self) -> None:
-        assert self._config() == (7.0, 15.0)
+        assert self._config() == (30.0, 4.0)
 
     def test_the_pr_395_survivors_get_four_times_the_limit_they_ran_out_of(self) -> None:
         constant, multiplier = self._config()
@@ -529,6 +533,16 @@ class TestPerMutantTimeLimit:
         limit = (self.PR_395_CALL_SECONDS + constant) * multiplier
 
         assert limit >= 4 * self.DEFAULT_LIMIT_SECONDS
+
+    def test_a_62_second_estimate_gets_a_368_second_wall_limit(self) -> None:
+        constant, multiplier = self._config()
+
+        assert (62.0 + constant) * multiplier == 368.0
+
+    def test_the_826_second_kill_would_now_time_out(self) -> None:
+        constant, multiplier = self._config()
+
+        assert (59.0 + constant) * multiplier < 826.0
 
 
 # `run` is faked (it would run a test suite); `results` and `show` are the
@@ -779,7 +793,7 @@ class TestInheritedTotalBudget:
 
 
 def _repo_ready_to_resume(tmp_path: Path) -> tuple[Path, Path]:
-    """A repo whose changed function has 5 mutants, and a ledger with 1 to 3 killed (#943)."""
+    """A changed function with 5 mutants; the ledger has 1-3 killed, 4 survived, 5 suspicious."""
     repo = _repo_with_a_changed_legacy_function(tmp_path)
     (repo / "scripts" / "quality" / "ratchet-baseline.toml").write_text("")
     ledger = REPO_ROOT / "scripts" / "ci" / "mutation_ledger.py"
@@ -795,7 +809,8 @@ def _repo_ready_to_resume(tmp_path: Path) -> tuple[Path, Path]:
     data = json.loads(meta.read_text(encoding="utf-8"))
     for n in (1, 2, 3):
         data["exit_code_by_key"][f"lovspor.mod.x_answer__mutmut_{n}"] = 1
-    data["exit_code_by_key"]["lovspor.mod.x_answer__mutmut_4"] = 0  # survived: measured again
+    data["exit_code_by_key"]["lovspor.mod.x_answer__mutmut_4"] = 0  # survived: carried
+    data["exit_code_by_key"]["lovspor.mod.x_answer__mutmut_5"] = 35  # suspicious: measured again
     meta.write_text(json.dumps(data), encoding="utf-8")
     archive = tmp_path / "ledger.tar.gz"
     subprocess.run(
@@ -822,19 +837,21 @@ class TestResumeFromLedger:
             check=False,
         )
 
-    def test_only_the_mutants_without_a_carried_kill_are_run(self, tmp_path: Path) -> None:
+    def test_only_the_mutants_without_a_carried_result_are_run(self, tmp_path: Path) -> None:
         repo, archive = _repo_ready_to_resume(tmp_path)
 
         result = self._run(repo, archive)
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert (repo / "run-args.txt").read_text(encoding="utf-8").split() == [
-            "lovspor.mod.x_answer__mutmut_4",
             "lovspor.mod.x_answer__mutmut_5",
             "--max-children",
             "4",
         ]
-        assert "3 killed result(s) kept, 1 other result(s) to measure again" in result.stdout
+        assert (
+            "4 killed/survived/timeout result(s) kept, 1 other result(s) to measure again"
+            in result.stdout
+        )
 
     def test_without_a_ledger_file_the_whole_scope_runs(self, tmp_path: Path) -> None:
         repo, _ = _repo_ready_to_resume(tmp_path)

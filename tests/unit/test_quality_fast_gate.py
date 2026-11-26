@@ -32,6 +32,7 @@ FAST_CHECKS = {
     "ratchets": "uv run python scripts/quality/check_ratchets.py",
     "boundaries": "uv run python scripts/quality/check_boundaries.py",
     "dependency-policy": "uv run python scripts/quality/check_dependency_policy.py",
+    "owner-changes": ("uv run lovspor ops owner-changes check --file ops/lovverk-owner-changes"),
     "release-contracts": (
         "uv run pytest tests/unit/test_release_contracts.py -q -p no:cacheprovider"
     ),
@@ -367,6 +368,9 @@ PIPELINE = REPO_ROOT / ".github" / "workflows" / "pr-pipeline.yml"
 CI_ONLY = {
     "Sync dependencies": (
         "provisions the hosted runner's venv; locally every check's `uv run` syncs it"
+    ),
+    "Owner-change pin file is changed alone": (
+        "reads the pull request's files and commits from the GitHub API; no local counterpart"
     ),
 }
 # fast-ci steps that run locally at push instead of commit, mapped to the

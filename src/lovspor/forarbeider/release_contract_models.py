@@ -14,13 +14,34 @@ Three things are kept apart, each its own record:
 
 **Trust boundaries.** Every piece of evidence names the source it came from.
 ``TRUST_BOUNDARIES`` states, for each kind, the independent sources that may
-vouch for it, and ``VERIFIED_SOURCES`` the sources whose verifier exists in
-the engine today. Evidence counts as verified only when its status says so
-*and* its source is both accepted for its kind and verified. ``api_request``
-is never accepted: a head, an inventory or an approval is not trusted because
-a caller sent it. Today only the engine trust root and owner-signed FC7b
-records have verifiers, so anchors, inventories, legal assessments, signed
-limits and the budget ledger are untrusted whatever they claim.
+vouch for it, and ``VERIFIED_SOURCES`` (derived from it) the sources whose
+verifier exists in the engine today. A source label is only a claim, so
+evidence counts as verified (:func:`verified`) only when its status says so,
+its source is accepted for its kind and verified, *and* it carries the seal
+of the engine verifier that produced it
+(:mod:`lovspor.forarbeider.release_provenance`). ``api_request`` is never
+accepted: a head, an inventory or an approval is not trusted because a caller
+sent it, and a record built by hand with ``status="verified"`` has no seal.
+The lineage-head anchors and the D10 legal assessment have no verifier, so
+their evidence is never trusted whatever it claims (AR6/AR8 and D10 must each
+prove source authenticity before they can be). A kind may have several
+boundaries, one per source: the document inventory is verified only when the
+owner signed it (AR2); an official catalogue (FC11, D7) has no verifier yet.
+
+**AR1b** adds the owner-signed limits (:mod:`release_limits_models`), the
+budget ledger (:mod:`release_ledger_models`) and the owner-signed stop/resume
+chain (:mod:`release_control_models`), each with its verifier and the
+``stop_control`` gate. The ledger and the control chain are local hash
+chains: neither proves append-only storage, completeness or concurrency
+safety, so both stay ``unanchored`` and their gates fail until AR5 provides
+:data:`LEDGER_REQUIREMENTS` and an external anchor for the control head.
+
+**AR2** adds the owner-signed document inventory
+(:mod:`release_inventory_models`) and the batch plan
+(:mod:`release_plan_models`), each with its verifier. A release is one batch
+of a plan: the inventory gate accounts for every expected document through
+the plan, and the constraints gate counts the batch the planner computed
+from the artifacts, never the caller's numbers.
 
 **Owner decisions.** D10 cannot be recorded as accepted
 (``independently_accepted`` is ``Literal[False]``) and D11 governance is the
@@ -28,6 +49,7 @@ FC7b ``Governance`` record, which knows only ``proposed_not_accepted``.
 Nothing here states a legal conclusion.
 """
 
+from datetime import date
 from typing import Final, Literal, Self
 
 from pydantic import Field, model_validator
@@ -35,6 +57,9 @@ from pydantic import Field, model_validator
 from lovspor.forarbeider.identity import DocumentType
 from lovspor.forarbeider.policy_authorization_models import CheckStatus, Governance
 from lovspor.forarbeider.policy_trust import Origin, Role
+from lovspor.forarbeider.release_limits_models import ReleaseConstraints
+from lovspor.forarbeider.release_plan_models import ReleasePlan
+from lovspor.forarbeider.release_provenance import VERIFIERS, Provenance, authentic
 from lovspor.forarbeider.version_models import Digest, Frozen, NonBlank
 from lovspor.forarbeider.version_release_models import (
     PolicyReference,
@@ -42,10 +67,7 @@ from lovspor.forarbeider.version_release_models import (
     ReleaseVerification,
 )
 
-CONTRACT_VERSION: Final = "release-contract/1"
-#: The hard batch bounds of §9.3 step 2 (recommended answer, pending).
-MAX_BATCH_FILES: Final = 100
-MAX_BATCH_BYTES: Final = 25_000_000
+CONTRACT_VERSION: Final = "release-contract/2"
 
 GateId = Literal[
     "inventory",
@@ -59,6 +81,7 @@ GateId = Literal[
     "publisher",
     "privacy_rights",
     "freshness",
+    "stop_control",
     "constraints",
     "execution_controls",
 ]
@@ -74,6 +97,7 @@ GATES: Final[tuple[GateId, ...]] = (
     "publisher",
     "privacy_rights",
     "freshness",
+    "stop_control",
     "constraints",
     "execution_controls",
 )
@@ -97,6 +121,17 @@ LEGAL_QUESTIONS: Final = (
     "rights_section_29",
 )
 
+#: What AR5 must provide before ledger evidence can pass a gate: a local hash
+#: chain alone proves neither append-only storage nor concurrency safety.
+LEDGER_REQUIREMENTS: Final = (
+    "atomic_append_with_compare_and_swap_on_the_head",
+    "durable_before_the_publication_call",
+    "external_anchor_of_the_head_outside_the_runner",
+    "single_writer_lock_per_ledger",
+    "reserve_before_publication_settle_after_verification",
+    "reconcile_against_the_published_history",
+)
+
 SourceKind = Literal[
     "api_request",
     "engine_trust_root",
@@ -107,16 +142,25 @@ SourceKind = Literal[
     "owner_signed_anchor",
     "independent_legal_assessment",
     "owner_signed_policy_limits",
+    "owner_signed_control",
     "runner_budget_ledger",
+    "engine_release_verifier",
+    "engine_release_planner",
+    "engine_quarantine",
 ]
 EvidenceKind = Literal[
     "lineage_head_anchor",
     "document_inventory",
     "signer_registry",
+    "publisher_identity",
     "policy_approval",
+    "manifest_reproduction",
     "legal_assessment",
     "publication_limits",
+    "release_control",
     "budget_ledger",
+    "batch_plan",
+    "quarantine_assessment",
 ]
 EvidenceStatus = Literal["missing", "invalid", "verified"]
 
@@ -139,9 +183,21 @@ TRUST_BOUNDARIES: Final = (
     ),
     TrustBoundary(
         evidence="document_inventory",
-        accepted_sources=("owner_signed_inventory", "official_catalogue"),
+        accepted_sources=("owner_signed_inventory",),
+        verifier="lovspor.forarbeider.release_inventory.verify_inventory",
+        implemented_by="AR2; owner key by owner-merged change (D6)",
+    ),
+    TrustBoundary(
+        evidence="document_inventory",
+        accepted_sources=("official_catalogue",),
         verifier="not_implemented",
-        implemented_by="AR2 with FC11 discovery (D5)",
+        implemented_by="FC11 discovery after D7, with a catalogue authenticity verifier",
+    ),
+    TrustBoundary(
+        evidence="batch_plan",
+        accepted_sources=("engine_release_planner",),
+        verifier="lovspor.forarbeider.release_plan.plan_release",
+        implemented_by="AR2",
     ),
     TrustBoundary(
         evidence="signer_registry",
@@ -150,10 +206,28 @@ TRUST_BOUNDARIES: Final = (
         implemented_by="FC7b; keys by owner-merged change (D6)",
     ),
     TrustBoundary(
+        evidence="publisher_identity",
+        accepted_sources=("engine_trust_root",),
+        verifier="lovspor.forarbeider.release_sources.publisher_of",
+        implemented_by="FC7b trust root; the bot key by owner-merged change (D6)",
+    ),
+    TrustBoundary(
         evidence="policy_approval",
         accepted_sources=("owner_signed_record",),
         verifier="lovspor.forarbeider.policy_authorization.verify_authorization",
         implemented_by="FC7b",
+    ),
+    TrustBoundary(
+        evidence="manifest_reproduction",
+        accepted_sources=("engine_release_verifier",),
+        verifier="lovspor.forarbeider.version_release.verify_release",
+        implemented_by="FC8b",
+    ),
+    TrustBoundary(
+        evidence="quarantine_assessment",
+        accepted_sources=("engine_quarantine",),
+        verifier="lovspor.forarbeider.release_quarantine_run.run_quarantine",
+        implemented_by="AR3; atomic persistence and an anchor of the ledger are AR5",
     ),
     TrustBoundary(
         evidence="legal_assessment",
@@ -164,27 +238,43 @@ TRUST_BOUNDARIES: Final = (
     TrustBoundary(
         evidence="publication_limits",
         accepted_sources=("owner_signed_policy_limits",),
-        verifier="not_implemented",
-        implemented_by="a signed policy v2 limits record (not built yet), AR5",
+        verifier="lovspor.forarbeider.release_limits.verify_limits",
+        implemented_by="AR1b; owner key by owner-merged change (D6)",
+    ),
+    TrustBoundary(
+        evidence="release_control",
+        accepted_sources=("owner_signed_control",),
+        verifier="lovspor.forarbeider.release_control.verify_control",
+        implemented_by="AR1b chain verifier; the external head anchor is AR5",
     ),
     TrustBoundary(
         evidence="budget_ledger",
         accepted_sources=("runner_budget_ledger",),
-        verifier="not_implemented",
-        implemented_by="AR5",
+        verifier="lovspor.forarbeider.release_ledger.verify_ledger",
+        implemented_by="AR1b chain verifier; atomic persistence and anchor are AR5",
     ),
 )
-#: Sources with a verifier in the engine today. Adding one needs its verifier.
+#: Sources with a verifier in the engine today, derived from the boundaries.
 VERIFIED_SOURCES: Final[frozenset[SourceKind]] = frozenset(
-    {"engine_trust_root", "owner_signed_record"}
+    source
+    for boundary in TRUST_BOUNDARIES
+    if boundary.verifier != "not_implemented"
+    for source in boundary.accepted_sources
 )
 
 
 def trusted(kind: EvidenceKind, status: EvidenceStatus, source: SourceKind | None) -> bool:
-    """Whether evidence of ``kind`` counts as verified: status, accepted source, verifier."""
-    boundary = next(item for item in TRUST_BOUNDARIES if item.evidence == kind)
-    return (
-        status == "verified" and source in boundary.accepted_sources and source in VERIFIED_SOURCES
+    """Whether a label could vouch for ``kind``: status, accepted source, verifier. Not enough.
+
+    A label is a claim; :func:`verified` also demands the verifier's seal.
+    """
+    if status != "verified" or source not in VERIFIED_SOURCES:
+        return False
+    return any(
+        item.evidence == kind
+        and source in item.accepted_sources
+        and item.verifier != "not_implemented"
+        for item in TRUST_BOUNDARIES
     )
 
 
@@ -194,6 +284,7 @@ class _Evidence(Frozen):
     status: EvidenceStatus
     source: SourceKind | None
     reasons: tuple[NonBlank, ...]
+    provenance: Provenance | None = None
 
     def _require(self, record: object) -> None:
         if self.status == "verified" and (self.source is None or record is None):
@@ -230,13 +321,38 @@ class DocumentInventory(Frozen):
 
 
 class InventoryEvidence(_Evidence):
+    """The expected documents as verified: the inventory, its policy, version and signer."""
+
     inventory: DocumentInventory | None
     inventory_sha256: Digest | None
+    inventory_version: int | None = Field(default=None, ge=1)
+    policy: PolicyReference | None = None
+    discovery_sha256s: tuple[Digest, ...] = ()
+    trust_root_sha256: Digest | None = None
+    signer_fingerprint: NonBlank | None = None
+    signer_role: Role | None = None
 
     @model_validator(mode="after")
     def _complete(self) -> Self:
         self._require(self.inventory)
         return self
+
+
+class PlanEvidence(_Evidence):
+    """The batch plan as the engine's planner computed it from verified evidence."""
+
+    plan: ReleasePlan | None = None
+    plan_sha256: Digest | None = None
+    trust_root_sha256: Digest | None = None
+
+    @model_validator(mode="after")
+    def _complete(self) -> Self:
+        self._require(self.plan)
+        self._require(self.plan_sha256)
+        return self
+
+
+NO_PLAN: Final = PlanEvidence(status="missing", source=None, reasons=("plan_not_collected",))
 
 
 class HeadAnchor(Frozen):
@@ -263,6 +379,13 @@ class AnchorEvidence(_Evidence):
 # --- signers, publisher, approvals ---------------------------------------------------
 
 
+def verified(kind: EvidenceKind, evidence: _Evidence) -> bool:
+    """Whether ``evidence`` is verified: a trusted label *and* its verifier's seal."""
+    if not trusted(kind, evidence.status, evidence.source) or kind not in VERIFIERS:
+        return False
+    return authentic(evidence, kind)
+
+
 class SignerRegistry(Frozen):
     """The trust root the signatures were checked against, by digest and key counts."""
 
@@ -270,6 +393,7 @@ class SignerRegistry(Frozen):
     origin: Origin
     owner_keys: int = Field(ge=0)
     bot_keys: int = Field(ge=0)
+    provenance: Provenance | None = None
 
 
 class PublisherIdentity(Frozen):
@@ -279,6 +403,7 @@ class PublisherIdentity(Frozen):
     key_fingerprint: NonBlank | None
     role: Role | None
     namespaces: tuple[NonBlank, ...]
+    provenance: Provenance | None = None
 
 
 class ApprovalEvidence(Frozen):
@@ -292,6 +417,14 @@ class ApprovalEvidence(Frozen):
     max_documents_per_batch: int | None = Field(ge=1, le=100)
     legal_reference_stated: str | None
     governance: Governance
+    provenance: Provenance | None = None
+
+
+class ReproductionEvidence(Frozen):
+    """The FC8b verifier's result over the offered manifest, sealed by the engine."""
+
+    verification: ReleaseVerification
+    provenance: Provenance | None = None
 
 
 # --- D10 -----------------------------------------------------------------------------
@@ -322,23 +455,21 @@ class LegalAssessmentEvidence(_Evidence):
 # --- limits and budgets --------------------------------------------------------------
 
 
-class ReleaseConstraints(Frozen):
-    """Batch bounds and daily budgets; the batch bounds never exceed §9.3's."""
-
-    max_files_per_batch: int = Field(ge=1, le=MAX_BATCH_FILES)
-    max_bytes_per_batch: int = Field(ge=1, le=MAX_BATCH_BYTES)
-    max_documents_per_day: int = Field(ge=0)
-    max_files_per_day: int = Field(ge=0)
-    max_bytes_per_day: int = Field(ge=0)
-    max_commits_per_day: int = Field(ge=0)
-
-
 class LimitsEvidence(_Evidence):
+    """The owner-signed limits as verified: their constraints, policy and signer."""
+
     constraints: ReleaseConstraints | None
+    policy: PolicyReference | None = None
+    limits_id: NonBlank | None = None
+    limits_sha256: Digest | None = None
+    trust_root_sha256: Digest | None = None
+    signer_fingerprint: NonBlank | None = None
+    signer_role: Role | None = None
 
     @model_validator(mode="after")
     def _complete(self) -> Self:
         self._require(self.constraints)
+        self._require(self.limits_sha256)
         return self
 
 
@@ -349,12 +480,50 @@ class BudgetUsage(Frozen):
     commits: int = Field(ge=0)
 
 
+ReleaseState = Literal["none", "reserved", "settled", "cancelled"]
+
+
 class LedgerEvidence(_Evidence):
-    consumed: BudgetUsage | None
+    """One day's accounting as the ledger chain shows it; never anchored in AR1b."""
+
+    day: date | None = None
+    limits_sha256: Digest | None = None
+    committed: BudgetUsage | None = None
+    reserved: BudgetUsage | None = None
+    release_state: ReleaseState = "none"
+    release_reserved: BudgetUsage | None = None
+    entries: int = Field(default=0, ge=0)
+    head_sha256: Digest | None = None
+    anchoring: Literal["unanchored"] = "unanchored"
+    persistence_requirements: tuple[NonBlank, ...] = LEDGER_REQUIREMENTS
 
     @model_validator(mode="after")
     def _complete(self) -> Self:
-        self._require(self.consumed)
+        self._require(self.committed)
+        self._require(self.reserved)
+        self._require(self.head_sha256)
+        return self
+
+
+# --- stop and resume -----------------------------------------------------------------
+
+
+class ControlEvidence(_Evidence):
+    """The stop state the owner-signed control chain yields; stopped unless proven otherwise."""
+
+    policy_id: str | None = None
+    state: Literal["stopped", "not_stopped"] = "stopped"
+    active_stops: tuple[NonBlank, ...] = ()
+    records: int = Field(default=0, ge=0)
+    head_sha256: Digest | None = None
+    trust_root_sha256: Digest | None = None
+    anchoring: Literal["unanchored"] = "unanchored"
+
+    @model_validator(mode="after")
+    def _complete(self) -> Self:
+        self._require(self.head_sha256)
+        if self.state == "not_stopped" and (self.status != "verified" or self.active_stops):
+            raise ValueError("only a verified chain without an active stop is not stopped")
         return self
 
 
@@ -388,11 +557,12 @@ class ReleaseIntent(Frozen):
 class ReleaseEvidence(Frozen):
     """Everything the gates read; every part names where it came from."""
 
-    contract_version: Literal["release-contract/1"] = CONTRACT_VERSION
+    contract_version: Literal["release-contract/2"] = CONTRACT_VERSION
     intent: ReleaseIntent
     manifest: ReleaseManifest
-    reproduction: ReleaseVerification
+    reproduction: ReproductionEvidence
     inventory: InventoryEvidence
+    plan: PlanEvidence = NO_PLAN
     anchors: tuple[AnchorEvidence, ...]
     registry: SignerRegistry
     publisher: PublisherIdentity
@@ -400,6 +570,7 @@ class ReleaseEvidence(Frozen):
     legal: LegalAssessmentEvidence
     limits: LimitsEvidence
     ledger: LedgerEvidence
+    control: ControlEvidence
 
 
 # --- the verified authorization ------------------------------------------------------
@@ -439,16 +610,25 @@ REFUSING_CODES: Final = frozenset(
         "approval_conflict",
         "approval_for_unknown_policy",
         "approval_signed_by_bot",
+        "batch_artifact_binding_mismatch",
+        "batch_not_in_plan",
+        "batch_selection_mismatch",
         "batch_size_contradicts_intent",
+        "batch_size_contradicts_plan",
         "document_outside_inventory",
         "head_ahead_of_anchor",
         "intent_bindings_mismatch",
         "intent_documents_mismatch",
         "intent_release_mismatch",
+        "plan_inventory_mismatch",
+        "plan_limits_mismatch",
         "publisher_mismatch",
         "publisher_self_approval",
+        "release_already_settled",
         "reproduction_invalid",
         "reproduction_of_other_manifest",
+        "reservation_contradicts_batch",
+        "trust_root_conflict",
         "version_rolled_back",
     }
 )
@@ -459,7 +639,7 @@ class ReleaseGateVerdict(Frozen):
 
     schema_version: Literal[1] = 1
     record_type: Literal["forarbeider_release_gate_verdict"] = "forarbeider_release_gate_verdict"
-    evaluator_version: Literal["release-gates/1"] = "release-gates/1"
+    evaluator_version: Literal["release-gates/2"] = "release-gates/2"
     intent_sha256: Digest
     evidence_sha256: Digest
     release_id: Digest

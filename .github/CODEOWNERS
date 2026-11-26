@@ -1,6 +1,36 @@
 # Owner review for slug identity, the owner-exception approval and the
-# identity migration (#938). Kept narrow on purpose: every other path merges
-# under the ordinary main ruleset. See docs/identity-approval.md.
+# identity migration (#938). Kept narrow on purpose: no broad src/ entry; a
+# path not listed in this file merges under the ordinary main ruleset. See
+# docs/identity-approval.md.
 /.github/CODEOWNERS          @bartoszkobylinski
 /src/lovspor/identity/       @bartoszkobylinski
 /docs/identity-approval.md   @bartoszkobylinski
+
+# Preservation contracts (#958; owner decision: goldens are
+# never auto-regenerated or silently updated). CI policy and the agent scope
+# guard itself, the publication seal and its signer list, and the snapshots,
+# goldens and gate modules that pin served surfaces. The snapshot, golden and
+# gate-module paths below the blank line are also refused to every Codex lane
+# by scripts/ci/assert_codex_scope.sh (PROTECTED_PATTERNS); a unit test keeps
+# the two lists in step.
+/.github/workflows/                              @bartoszkobylinski
+/scripts/ci/                                     @bartoszkobylinski
+/scripts/seal/                                   @bartoszkobylinski
+/ops/publication-signers                         @bartoszkobylinski
+/ops/lovverk-owner-changes                       @bartoszkobylinski
+/docs/owner-changes.md                           @bartoszkobylinski
+/docs/publication-seal.md                        @bartoszkobylinski
+/benchmarks/llhb/runner/tool-surface-v*.json     @bartoszkobylinski
+
+/tests/fixtures/add_only/                        @bartoszkobylinski
+/tests/fixtures/mcp-existing-calls.json          @bartoszkobylinski
+/tests/fixtures/synthetic-flat-law.xml           @bartoszkobylinski
+/tests/fixtures/forarbeider/corpus/              @bartoszkobylinski
+/tests/unit/fixtures/site/pre-envelope/          @bartoszkobylinski
+/tests/unit/test_mcp_existing_calls.py           @bartoszkobylinski
+/tests/unit/test_llhb_mcp_surface.py             @bartoszkobylinski
+/tests/unit/test_rendering_golden.py             @bartoszkobylinski
+/tests/unit/test_publish_pages_golden.py         @bartoszkobylinski
+/tests/unit/test_forarbeider_corpus_golden.py    @bartoszkobylinski
+/tests/unit/test_site_routes.py                  @bartoszkobylinski
+/tests/unit/test_agentic_ci_scripts.py           @bartoszkobylinski

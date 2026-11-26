@@ -380,6 +380,140 @@ def test_scope_guard_stays_silent_when_existing_test_only_gains_lines(tmp_path: 
     assert "REWRITTEN TESTS" not in result.stdout
 
 
+# Preservation contracts (#958): snapshots, goldens and the
+# gate modules that pin them are refused to every lane, though they sit inside
+# the tests/ allowlist.
+_REPO = _SCRIPTS.parents[1]
+_PROTECTED_GOLDEN = "tests/fixtures/mcp-existing-calls.json"
+_PROTECTED_GATE = "tests/unit/test_site_routes.py"
+# This module: the guard's own tests, so an agent cannot weaken the checks that
+# keep PROTECTED_PATTERNS and CODEOWNERS in step.
+_PROTECTED_GUARD_TESTS = "tests/unit/test_agentic_ci_scripts.py"
+
+
+def _protected_patterns() -> list[str]:
+    """PROTECTED_PATTERNS, read from the script the workflows run."""
+    text = SCOPE_GUARD.read_text(encoding="utf-8")
+    block = text.split("PROTECTED_PATTERNS=(\n", 1)[1].split("\n)\n", 1)[0]
+    return [line.strip().strip('"') for line in block.splitlines() if line.strip()]
+
+
+def _scope_repo_with(tmp_path: Path, *relative: str) -> tuple[Path, str]:
+    """A repo whose base commit already carries the given files."""
+    repo, _ = _scope_repo(tmp_path)
+    for path in relative:
+        _write(repo, path)
+        _git(repo, "add", path)
+    _git(repo, "commit", "--quiet", "-m", "contracts")
+    return repo, _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+@pytest.mark.parametrize("lane", [(), ("remediation",)])
+@pytest.mark.parametrize("state", ["committed", "staged", "unstaged"])
+@pytest.mark.parametrize("protected", [_PROTECTED_GOLDEN, _PROTECTED_GATE, _PROTECTED_GUARD_TESTS])
+def test_scope_guard_refuses_editing_a_preservation_contract(
+    tmp_path: Path, protected: str, state: str, lane: tuple[str, ...]
+) -> None:
+    """A golden or gate module is never the agent's to rewrite, staged or not."""
+    repo, base = _scope_repo_with(tmp_path, protected)
+    (repo / protected).write_text("regenerated\n")
+    if state == "committed":
+        _git(repo, "commit", "--quiet", "-a", "-m", "regenerate")
+    elif state == "staged":
+        _git(repo, "add", protected)
+
+    result = _run_scope_guard(repo, base, *lane)
+
+    assert result.returncode == 1
+    assert "protected preservation contracts" in result.stderr
+    assert f"  {protected}\n" in result.stderr
+
+
+@pytest.mark.parametrize("protected", [_PROTECTED_GOLDEN, _PROTECTED_GATE])
+def test_scope_guard_refuses_deleting_a_preservation_contract(
+    tmp_path: Path, protected: str
+) -> None:
+    repo, base = _scope_repo_with(tmp_path, protected)
+    _git(repo, "rm", "--quiet", protected)
+    _git(repo, "commit", "--quiet", "-m", "drop")
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 1
+    assert f"  {protected}\n" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "added",
+    [
+        "tests/fixtures/add_only/v1/expected.json",
+        "tests/fixtures/forarbeider/corpus/new.md",
+        "tests/unit/fixtures/site/pre-envelope/new/index.html",
+    ],
+)
+def test_scope_guard_refuses_adding_under_a_golden_directory(tmp_path: Path, added: str) -> None:
+    """A new file in a golden tree is a new golden: the owner adds those."""
+    repo, base = _scope_repo(tmp_path)
+    _write(repo, added)
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 1
+    assert f"  {added}\n" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "allowed",
+    [
+        "tests/unit/test_site_routes_more.py",
+        "tests/unit/test_mcp_existing_calls_local.py",
+        "tests/fixtures/forarbeider/prop-new.html",
+        "tests/fixtures/add_only_notes.json",
+    ],
+)
+def test_scope_guard_still_allows_new_sibling_tests_and_fixtures(
+    tmp_path: Path, allowed: str
+) -> None:
+    """The protected list names contracts, not neighbourhoods: a new sibling
+    module or fixture beside a pinned one is the agent's normal work."""
+    repo, base = _scope_repo_with(tmp_path, _PROTECTED_GOLDEN, _PROTECTED_GATE)
+    _write(repo, allowed)
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_protected_patterns_are_all_codeowned() -> None:
+    """The guard and CODEOWNERS name the same contracts: an entry in one and
+    not the other is a contract only half protected."""
+    owned = {
+        line.split()[0]
+        for line in (_REPO / ".github" / "CODEOWNERS").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+    as_codeowners = {
+        "/" + (pattern[:-1] if pattern.endswith("/*") else pattern)
+        for pattern in _protected_patterns()
+    }
+
+    assert as_codeowners <= owned, sorted(as_codeowners - owned)
+
+
+def test_protected_exact_paths_exist() -> None:
+    """A renamed golden would fall out of the guard without a sound; only the
+    add_only tree (#958, not yet created) may be absent."""
+    missing = [
+        pattern
+        for pattern in _protected_patterns()
+        if pattern != "tests/fixtures/add_only/*"
+        and not (_REPO / pattern.removesuffix("*")).exists()
+    ]
+
+    assert _protected_patterns(), "PROTECTED_PATTERNS block not found"
+    assert missing == []
+
+
 def _pinned_mutmut() -> str:
     pyproject = tomllib.loads((_SCRIPTS.parents[1] / "pyproject.toml").read_text())
     pins = [dep for dep in pyproject["dependency-groups"]["dev"] if dep.startswith("mutmut==")]
