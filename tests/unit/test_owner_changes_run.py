@@ -22,17 +22,12 @@ from lovspor.owner_changes_run import (
     check_applied,
     write_report,
 )
+from tests.unit.owner_changes_support import committed_header
 from tests.unit.publication_seal_support import git, hermetic_git
 
 ROOT = Path(__file__).resolve().parents[2]
 DOC = "lokale-forskrifter/5025/doc.md"
 CONTEXT = RunContext("a" * 40, "7")
-
-
-def _committed_header() -> bytes:
-    """The committed pin file with every pin line removed, so a real pin keeps these tests valid."""
-    lines = (ROOT / "ops/lovverk-owner-changes").read_bytes().splitlines(keepends=True)
-    return b"".join(line for line in lines if not line.strip() or line.startswith(b"#"))
 
 
 class Lovverk:
@@ -92,7 +87,12 @@ def lovverk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Lovverk:
     return Lovverk(tmp_path)
 
 
-def test_empty_pin_file_makes_no_git_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "content", [b"", committed_header()], ids=["zero-bytes", "committed-header"]
+)
+def test_empty_pin_file_makes_no_git_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: bytes
+) -> None:
     """Regression for the existing sync: no pin, no git, no change."""
     hermetic_git(monkeypatch, tmp_path)
     calls: list[object] = []
@@ -103,7 +103,7 @@ def test_empty_pin_file_makes_no_git_call(tmp_path: Path, monkeypatch: pytest.Mo
 
     monkeypatch.setattr("lovspor.owner_changes_apply.subprocess.run", no_subprocess)
     pins = tmp_path / "pins"
-    pins.write_bytes(_committed_header())
+    pins.write_bytes(content)
     report = apply_pins(tmp_path / "no-such-clone", pins, CONTEXT)
     assert (report.file_problems, report.applied, report.refused, report.skipped) == (
         [],
@@ -332,7 +332,7 @@ def test_cli_apply_and_check_applied(lovverk: Lovverk) -> None:
 
 def test_cli_apply_with_the_committed_header_reports_nothing(tmp_path: Path) -> None:
     pins = tmp_path / "pins"
-    pins.write_bytes(_committed_header())
+    pins.write_bytes(committed_header())
     report = tmp_path / "report.json"
     result = _cli(
         "apply",

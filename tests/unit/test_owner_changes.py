@@ -16,16 +16,11 @@ from lovspor.owner_changes import (
     load_pin_file,
     parse_pin_file,
 )
+from tests.unit.owner_changes_support import committed_header, without_pins
 
 ROOT = Path(__file__).resolve().parents[2]
 SHA_A = "a" * 40
 SHA_B = "0123456789abcdef0123456789abcdef01234567"
-
-
-def _committed_header() -> bytes:
-    """The committed pin file with every pin line removed: comments and blanks only."""
-    lines = (ROOT / PIN_FILE).read_bytes().splitlines(keepends=True)
-    return b"".join(line for line in lines if not line.strip() or line.startswith(b"#"))
 
 
 def _problems(data: bytes) -> list[str]:
@@ -35,12 +30,18 @@ def _problems(data: bytes) -> list[str]:
 
 
 def test_committed_pin_file_is_valid() -> None:
-    """The committed file parses; it may hold pins, so the count is not fixed."""
-    assert isinstance(load_pin_file(ROOT / PIN_FILE), tuple)
+    """The committed file parses (load_pin_file raises otherwise); it may hold pins."""
+    assert len(load_pin_file(ROOT / PIN_FILE)) <= MAX_PINS
 
 
 def test_committed_header_alone_holds_no_pin() -> None:
-    assert parse_pin_file(_committed_header()) == ()
+    assert parse_pin_file(committed_header()) == ()
+
+
+def test_without_pins_drops_only_the_pin_lines() -> None:
+    data = f"# head\n{SHA_A} 1 1 a\n\n# mid\n{SHA_B} 42 2 b\n# tail\n".encode()
+    assert without_pins(data) == b"# head\n\n# mid\n# tail\n"
+    assert parse_pin_file(without_pins(data)) == ()
 
 
 def test_sync_workflow_reads_the_pin_file_only_in_the_apply_step() -> None:
@@ -187,7 +188,7 @@ def test_cli_accepts_the_committed_file() -> None:
 
 def test_cli_accepts_the_committed_header(tmp_path: Path) -> None:
     pin_file = tmp_path / "pins"
-    pin_file.write_bytes(_committed_header())
+    pin_file.write_bytes(committed_header())
     code, out, err = _check("--file", str(pin_file))
     assert (code, err) == (0, "")
     assert out.endswith(": 0 pins\n")
