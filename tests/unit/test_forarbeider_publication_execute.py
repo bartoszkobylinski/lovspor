@@ -129,9 +129,9 @@ def test_a_simulated_authorization_passes_every_check_it_can_make(rig_a: Rig) ->
     assert {c.name for c in evidence.checks if c.status == "failed"} == set()
     unavailable = {c.name for c in evidence.checks if c.status == "unavailable"}
     assert unavailable <= WAIVABLE_IN_SIMULATION
-    anchored = {"ar5_control_anchor", "ar5_ledger_anchor"}
+    anchored = {"ar5_control_anchor", "ar5_ledger_anchor", "ar5_quarantine_anchor"}
     assert set(AR5_TO_AR7_CHECKS) - anchored <= unavailable
-    assert not anchored & unavailable  # AR5b, AR5c: verified against the witness
+    assert not anchored & unavailable  # AR5b, AR5c, AR5 quarantine: verified against the witness
     assert evidence.waived == tuple(sorted(unavailable))
     content = rig_a.transaction.content
     assert (evidence.transaction_id, evidence.plan_id, evidence.batch_id) == (
@@ -178,6 +178,7 @@ def _authorized(rig: Rig, github: SimulatedGitHub, at: datetime, attempt: str | 
         rig.anchoring(),
         rig.workspace,
         rig.ledger,
+        rig.quarantine,
     )
     evidence = authorize(context)
     assert evidence.decision == "simulation_only", evidence.denied_by

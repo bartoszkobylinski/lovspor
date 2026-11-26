@@ -27,6 +27,11 @@ it **itself**, at the time it is given, immediately before a publication:
   ledger has not settled yet denies (``ledger_settlement_pending``);
 - ``ar5_ledger_anchor`` (AR5c, simulation): that durable ledger verifies
   against the independent witness; no simulation may waive it;
+- ``ar5_quarantine_anchor`` (AR5 integration, simulation): the quarantine the
+  sealed plan honours is the head of the anchored AR5d-4 chain, read and
+  re-verified now with its owner exceptions
+  (:mod:`~lovspor.forarbeider.publication_quarantine`), never the caller's
+  sealed assessment alone; no simulation may waive it;
 - ``remote_head``: ``main`` read now is the expected base;
 - ``path_identity``: the configured path is the transaction's, and on path A
   the transport's App identity is the pinned one;
@@ -36,8 +41,8 @@ it **itself**, at the time it is given, immediately before a publication:
 What no slice implements yet is ``unavailable``, never passed: the AR1 gate
 verdict (no passing state until D10, D11 and the lineage anchors),
 FC7b's pending blockers (D6, D10, D11, the missing integration and an
-unpinned trust root), in production the AR5 anchors of the control chain and
-the ledger (until AR7 provides a production witness), the
+unpinned trust root), in production the AR5 anchors of the control chain,
+the ledger and the quarantine (until AR7 provides a production witness), the
 AR6 manifest signature and the AR7 settings verification. Production needs
 every check passed, so it is denied; a simulation may waive exactly those, by
 name (:mod:`lovspor.forarbeider.publication_execution_models`).
@@ -62,7 +67,7 @@ from lovspor.forarbeider.policy_authorization import (
 )
 from lovspor.forarbeider.policy_authorization_models import PolicyAuthorization
 from lovspor.forarbeider.policy_trust import PUBLICATION_NAMESPACE, RELEASE_NAMESPACE, TrustRoot
-from lovspor.forarbeider.publication_anchors import anchor_reasons
+from lovspor.forarbeider.publication_anchors import anchor_reasons, attempts_witness
 from lovspor.forarbeider.publication_execution_models import (
     AppIdentity,
     AuthorizationCheck,
@@ -74,6 +79,11 @@ from lovspor.forarbeider.publication_execution_models import (
 )
 from lovspor.forarbeider.publication_ledger import BudgetLedger
 from lovspor.forarbeider.publication_models import ProposalCounts, PublicationTransaction
+from lovspor.forarbeider.publication_quarantine import (
+    QuarantineClaim,
+    WitnessedSource,
+    quarantine_reasons,
+)
 from lovspor.forarbeider.release_contract_models import (
     BudgetUsage,
     ControlEvidence,
@@ -134,6 +144,8 @@ class AuthorizationContext(NamedTuple):
     workspace: Path | None = None
     #: AR5c: the durable budget ledger; in simulation the only ledger the budget reads.
     ledger: BudgetLedger | None = None
+    #: AR5 integration: the anchored quarantine chain; in simulation the only quarantine.
+    quarantine: WitnessedSource | None = None
 
 
 class _Found(NamedTuple):
@@ -210,13 +222,16 @@ def _quarantine(context: AuthorizationContext, plan: ReleasePlan | None) -> Auth
 
 
 def _trust_root(context: AuthorizationContext) -> AuthorizationCheck:
+    """The plan, the quarantine and every anchor are verified under the one trust root in use."""
     root = context.root.sha256
     same = (
         context.inputs.plan.trust_root_sha256 == root == context.inputs.quarantine.trust_root_sha256
     )
-    return _check(
-        "trust_root", [] if same and context.root.entries else ["trust_root_not_the_plans"]
-    )
+    reasons = [] if same and context.root.entries else ["trust_root_not_the_plans"]
+    anchoring = context.anchoring
+    if anchoring is not None and anchoring.root.sha256 != root:
+        reasons.append("anchor_trust_root_not_the_requests")
+    return _check("trust_root", reasons)
 
 
 def _approval_reasons(verdict: PolicyAuthorization) -> list[str]:
@@ -400,7 +415,7 @@ def _checks(context: AuthorizationContext) -> tuple[list[AuthorizationCheck], _F
     anchors = _control_anchor(context, plan)
     ledger_anchor = _ledger_anchor(context)
     found = [policy, pending, publisher, limits_check, control_check, latch, anchors, budget_check]
-    found.append(ledger_anchor)
+    found += [ledger_anchor, _quarantine_anchor(context, plan)]
     return [*_bindings(context, plan), *found, remote_check, *_execution(context)], _Found(
         plan, limits, control, ledger, head, fingerprint
     )
@@ -436,6 +451,26 @@ def _ledger_anchor(context: AuthorizationContext) -> AuthorizationCheck:
     repository = context.inputs.settings.repository
     found = publication_ledger.anchor_reasons(context.ledger, context.anchoring, repository)
     return _check("ar5_ledger_anchor", found)
+
+
+def _quarantine_anchor(
+    context: AuthorizationContext, plan: ReleasePlan | None
+) -> AuthorizationCheck:
+    """AR5: the plan's quarantine is the anchored chain's head, re-verified now; never waived."""
+    if context.mode == "production":
+        return _unavailable(
+            "ar5_quarantine_anchor", "quarantine_anchor_production_witness_ar7_pending"
+        )
+    anchoring = context.anchoring
+    authority = None if anchoring is None else attempts_witness(anchoring, context.ledger)
+    bound = (
+        context.inputs.quarantine.quarantine_sha256,
+        None if plan is None else plan.basis.quarantine_sha256,
+    )
+    policy = None if plan is None else plan.basis.policy
+    claim = QuarantineClaim(context.inputs.settings.repository, bound, policy)
+    found = quarantine_reasons((context.quarantine, authority), claim, context.now)
+    return _check("ar5_quarantine_anchor", found)
 
 
 def _bindings(context: AuthorizationContext, plan: ReleasePlan | None) -> list[AuthorizationCheck]:

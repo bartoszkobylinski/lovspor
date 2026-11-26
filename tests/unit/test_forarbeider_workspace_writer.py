@@ -20,6 +20,7 @@ import hashlib
 import multiprocessing
 import shutil
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,9 @@ from lovspor.forarbeider.publication_execute import (
     execute,
 )
 from lovspor.forarbeider.publication_ledger import BudgetLedger
+from lovspor.forarbeider.publication_quarantine import WitnessedSource
 from lovspor.forarbeider.publication_sandbox import SimulatedCrash, SimulatedGitHub
+from lovspor.forarbeider.quarantine_succession import QuarantineStore, initialize_quarantine
 from lovspor.forarbeider.release_limits import LimitsRequest, verify_limits
 from lovspor.forarbeider.workspace_writer_models import LEASE, SEND_MARGIN
 from tests.unit.forarbeider_execution_support import (
@@ -49,6 +52,7 @@ from tests.unit.forarbeider_execution_support import (
     reserve,
     seeded_ledger,
 )
+from tests.unit.forarbeider_release_control_support import policy_bytes
 
 
 def endpoint(head: str) -> SimulatedGitHub:
@@ -95,7 +99,12 @@ def other(rig: Rig, tmp_path: Path) -> Rig:
     """Another transaction (and its own workspace and identity) on ``rig``'s keys and witness."""
     found = make_rig(tmp_path / "b", "A", share=rig, one_witness=True)
     assert found.transaction.transaction_id != rig.transaction.transaction_id
-    return found
+    # Its own quarantine chain, as it has its own ledger here: these tests nest one
+    # workspace's send inside another's, which one shared chain serializes (AR5).
+    store = QuarantineStore(tmp_path / "b" / "own-quarantine", "synthetic-quarantine-own")
+    repository = found.inputs.settings.repository
+    assert initialize_quarantine(store, repository, found.anchoring()).status == "verified"
+    return replace(found, quarantine=WitnessedSource(store, (policy_bytes(),)))
 
 
 # --- the three protections that are not writer exclusivity -----------------------------------

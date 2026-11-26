@@ -19,7 +19,6 @@ from lovspor.forarbeider.control_plane_anchor import (
     AnchorAuthority,
     AnchorQuery,
     anchor_pending,
-    initialize,
     verify,
     workspace_scope,
 )
@@ -36,6 +35,7 @@ from lovspor.forarbeider.policy_trust import (
     QUARANTINE_NAMESPACE,
     TrustRoot,
 )
+from lovspor.forarbeider.publication_anchors import initialize_attempts, initialize_control
 from lovspor.forarbeider.publication_authorize import AuthorizationInputs
 from lovspor.forarbeider.publication_execute import (
     ExecutionOutcome,
@@ -44,16 +44,23 @@ from lovspor.forarbeider.publication_execute import (
     execute,
 )
 from lovspor.forarbeider.publication_execution_models import AppIdentity, PublicationSettings
-from lovspor.forarbeider.publication_ledger import BudgetLedger
+from lovspor.forarbeider.publication_ledger import BudgetLedger, initialize_ledger
 from lovspor.forarbeider.publication_models import PublicationTransaction
-from lovspor.forarbeider.publication_prepare import PreparationRequest, prepare_publication
+from lovspor.forarbeider.publication_prepare import PreparationRequest
+from lovspor.forarbeider.publication_quarantine import (
+    WitnessedSource,
+    Witnessing,
+    prepare_witnessed,
+)
 from lovspor.forarbeider.publication_sandbox import DisposableRemote, create_disposable_remote
+from lovspor.forarbeider.quarantine_succession import QuarantineStore, initialize_quarantine
 from lovspor.forarbeider.release_contract_models import BudgetUsage, LimitsEvidence
 from lovspor.forarbeider.release_ledger import entry_bytes, plan_entry
 from lovspor.forarbeider.release_ledger_models import LedgerOperation
 from lovspor.forarbeider.release_limits import LimitsMaterial, LimitsRequest, verify_limits
 from lovspor.forarbeider.release_plan import build_plan
 from lovspor.forarbeider.release_provenance import issue_provenance
+from lovspor.forarbeider.release_quarantine import EMPTY_LEDGER, quarantine_set
 from lovspor.forarbeider.workspace_identity import establish
 from lovspor.forarbeider.workspace_writer_models import LEASE
 from tests.unit.forarbeider_authorization_support import (
@@ -67,7 +74,6 @@ from tests.unit.forarbeider_authorization_support import (
 )
 from tests.unit.forarbeider_publication_support import (
     git,
-    quarantine_of,
     sealed_plan,
     sealed_quarantine,
     source_repository,
@@ -130,6 +136,8 @@ class Rig:
     witness: OfflineAnchorWitness
     witness_key: Key
     ledger: BudgetLedger
+    #: AR5 integration: the anchored quarantine chain the publication reads.
+    quarantine: WitnessedSource | None = None
 
     def anchoring(self, **changes: Any) -> AnchorAuthority:
         fields: dict[str, Any] = {
@@ -152,6 +160,7 @@ class Rig:
             "workspace": self.workspace,
             "anchoring": self.anchoring(),
             "ledger": self.ledger,
+            "quarantine": self.quarantine,
         }
         return ExecutionRequest(**(fields | changes))
 
@@ -252,7 +261,7 @@ def make_rig(
     assert limits_evidence.status == "verified", limits_evidence.reasons
     store = Store()
     rows = [synthetic_row(store, n) for n in numbers]
-    found = quarantine_of()
+    found = quarantine_set(EMPTY_LEDGER)
     limits_sha = limits_evidence.limits_sha256
     plan = build_plan(
         context(numbers, rows, limits_sha256=limits_sha), rows, store.artifacts, found
@@ -269,7 +278,15 @@ def make_rig(
     source, base = source_repository(tmp / "src")
     work = tmp / "work"
     work.mkdir(mode=0o700)
-    prepared = prepare_publication(
+    witness_dir = tmp / "witness"
+    witness_dir.mkdir(mode=0o700)
+    witness = (
+        share.witness
+        if share is not None and one_witness
+        else OfflineAnchorWitness(witness_dir, KeySigner(WITNESS, witness_key))
+    )
+    witnessing = chain_of(tmp, share, witness, root)
+    prepared = prepare_witnessed(
         PreparationRequest(
             plan=sealed,
             quarantine=quarantine,
@@ -279,6 +296,7 @@ def make_rig(
             path=path,  # type: ignore[arg-type]
             base_commit=base,
         ),
+        witnessing,
         source,
         work,
     )
@@ -301,13 +319,6 @@ def make_rig(
     )
     workspace = tmp / "attempts"
     workspace.mkdir(mode=0o700)
-    witness_dir = tmp / "witness"
-    witness_dir.mkdir(mode=0o700)
-    witness = (
-        share.witness
-        if share is not None and one_witness
-        else OfflineAnchorWitness(witness_dir, KeySigner(WITNESS, witness_key))
-    )
     rig = Rig(
         tmp,
         owner,
@@ -328,9 +339,42 @@ def make_rig(
         BudgetLedger(tmp / "ledger", LEDGER_ID)
         if share is None
         else BudgetLedger(share.ledger.root, share.ledger.ledger_id, share.witness),
+        witnessing.source,
     )
-    anchor_rig(rig, seed=share is None, control=not (share is not None and one_witness))
+    anchor_rig(rig, seed=share is None, control_anchoring=share is None)
     return rig
+
+
+def chain_of(
+    tmp: Path, share: "Rig | None", witness: OfflineAnchorWitness, root: TrustRoot
+) -> Witnessing:
+    """AR5: the rig's quarantine chain, anchored first on the ledger's witness.
+
+    The batch is prepared only once its quarantine is proved to be the anchored head's.
+    """
+    if share is None:
+        authority = AnchorAuthority(witness, root, NOW)
+        verdict = initialize_quarantine(quarantine_store(tmp), REPOSITORY_OF_RIG, authority)
+        assert verdict.status == "verified"
+        chain = quarantine_source(tmp)
+        on = witness
+    else:
+        assert share.quarantine is not None
+        chain, on = share.quarantine, share.witness
+    return Witnessing(chain, AnchorAuthority(on, root, NOW), REPOSITORY_OF_RIG, NOW)
+
+
+QUARANTINE_ID = "synthetic-quarantine"
+REPOSITORY_OF_RIG = settings_for("A").repository
+
+
+def quarantine_store(tmp: Path) -> QuarantineStore:
+    """The rig's quarantine chain (AR5d-4), one per ledger, beside the budget ledger."""
+    return QuarantineStore(tmp / "quarantine", QUARANTINE_ID)
+
+
+def quarantine_source(tmp: Path) -> WitnessedSource:
+    return WitnessedSource(quarantine_store(tmp), (policy_bytes(),))
 
 
 def anchor_queries(rig: "Rig", workspace: Path | None = None) -> dict[str, AnchorQuery]:
@@ -378,7 +422,7 @@ def policy_id_of(rig: "Rig") -> str:
     return plan.basis.policy.policy_id
 
 
-def anchor_rig(rig: "Rig", seed: bool = True, control: bool = True) -> None:
+def anchor_rig(rig: "Rig", seed: bool = True, control_anchoring: bool = True) -> None:
     """Test setup: the workspace's identity, which anchors its scope's families empty
     (AR5d-1, AR5d-2), the transaction's empty attempts (on the ledger's witness when it
     names one, AR5d-3; already anchored there by another workspace of the same
@@ -394,18 +438,21 @@ def anchor_rig(rig: "Rig", seed: bool = True, control: bool = True) -> None:
         authority if rig.ledger.witness is None else rig.anchoring(witness=rig.ledger.witness)
     )
     if verify(queries["publication_attempts"], attempts).status != "verified":
-        assert initialize(queries["publication_attempts"], attempts).status == "verified"
-    if not control:
-        assert verify(queries["control_history"], authority).status == "verified"
-        return
+        assert initialize_attempts(rig.request()).status == "verified"
+    # #1029: the owner's control history lives on the ledger's witness too; a rig
+    # sharing a ledger finds it already anchored there by the rig it shares with.
     control = queries["control_history"]
+    if not control_anchoring or verify(control, attempts).status == "verified":
+        assert verify(control, attempts).status == "verified"
+        if seed:
+            seed_ledger(rig, rig.inputs.ledger)
+        return
     policy_id = policy_id_of(rig)
-    empty = AnchorQuery("control_history", repository, policy_id, control_chain((), policy_id))
-    assert initialize(empty, authority).status == "verified"
+    assert initialize_control(rig.request(), policy_id).status == "verified"
     for count in range(1, len(rig.inputs.control) + 1):
         prefix = control_chain(rig.inputs.control[:count], policy_id)
         step = AnchorQuery("control_history", repository, policy_id, prefix)
-        assert anchor_pending(step, authority).status == "verified"
+        assert anchor_pending(step, attempts).status == "verified"
     assert control.local.reasons == ()
     if seed:
         seed_ledger(rig, rig.inputs.ledger)
@@ -442,10 +489,9 @@ def write_entry(rig: "Rig", raw: bytes) -> None:
 
 def seed_ledger(rig: "Rig", entries: tuple[bytes, ...]) -> None:
     """Test setup: an anchored empty ledger, then each entry appended and anchored."""
-    rig.ledger.root.mkdir(mode=0o700, exist_ok=True)
-    ledger_folder(rig).mkdir(mode=0o700)
     authority = rig.anchoring(workspace=rig.ledger.root)
-    assert initialize(ledger_query(rig), authority).status == "verified"
+    repository = rig.inputs.settings.repository
+    assert initialize_ledger(rig.ledger, rig.anchoring(), repository).status == "verified"
     for raw in entries:
         write_entry(rig, raw)
         assert anchor_pending(ledger_query(rig), authority).status == "verified"

@@ -69,6 +69,7 @@ CheckName = Literal[
     "fc7b_pending_blockers",
     "ar5_control_anchor",
     "ar5_ledger_anchor",
+    "ar5_quarantine_anchor",
     "ar6_release_manifest_signature",
     "ar7_repository_settings",
 ]
@@ -77,13 +78,14 @@ CheckName = Literal[
 AR5_TO_AR7_CHECKS: Final[tuple[CheckName, ...]] = (
     "ar5_control_anchor",
     "ar5_ledger_anchor",
+    "ar5_quarantine_anchor",
     "ar6_release_manifest_signature",
     "ar7_repository_settings",
 )
 #: Checks a simulation may waive, each listed; anything else unavailable denies.
 WAIVABLE_IN_SIMULATION: Final[frozenset[str]] = frozenset(
     {*AR5_TO_AR7_CHECKS, "ar1_gate_verdict", "fc7b_pending_blockers"}
-    - {"ar5_control_anchor", "ar5_ledger_anchor"}
+    - {"ar5_control_anchor", "ar5_ledger_anchor", "ar5_quarantine_anchor"}
 )
 CheckStatus = Literal["passed", "failed", "unavailable"]
 Mode = Literal["production", "simulation"]

@@ -43,8 +43,8 @@ A document-local failure never reaches here: AR4a returns it to AR3 before a
 proposal exists, and a clone without a ``prepared`` proposal is denied.
 """
 
-from collections.abc import Callable, Mapping
-from contextlib import AbstractContextManager, nullcontext
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -79,6 +79,11 @@ from lovspor.forarbeider.publication_execution_models import (
 )
 from lovspor.forarbeider.publication_ledger import BudgetLedger
 from lovspor.forarbeider.publication_path_b import Signer
+from lovspor.forarbeider.publication_quarantine import (
+    QuarantineClaim,
+    WitnessedSource,
+    quarantine_reasons,
+)
 from lovspor.forarbeider.publication_sandbox import DisposableRemote, SimulatedGitHub
 from lovspor.forarbeider.release_control import ControlRequest, verify_control
 from lovspor.forarbeider.release_provenance import authentic
@@ -99,6 +104,8 @@ class ExecutionRequest(NamedTuple):
     anchoring: AnchorAuthority | None = None
     #: AR5c: the durable budget ledger; without one, a simulation is denied.
     ledger: BudgetLedger | None = None
+    #: AR5 integration: the anchored quarantine chain; without one, a simulation is denied.
+    quarantine: WitnessedSource | None = None
 
 
 class Simulation(NamedTuple):
@@ -345,14 +352,30 @@ def _context(
         anchoring,
         request.workspace,
         request.ledger,
+        request.quarantine,
     )
 
 
-def _ledger_held(request: ExecutionRequest) -> AbstractContextManager[None]:
-    """AR5c: the budget ledger's lock, taken inside the workspace lock (never the reverse)."""
-    if request.ledger is None:
-        return nullcontext()
-    return publication_ledger.ledger_lock(request.ledger)
+@contextmanager
+def _ledger_held(request: ExecutionRequest) -> Iterator[None]:
+    """AR5c: the budget ledger's lock, taken inside the workspace lock (never the reverse).
+
+    Then the quarantine chain's lock (AR5 integration): no successor is
+    anchored between the final check and the send. Order: workspace, budget
+    ledger, quarantine chain, witness (a leaf); a successor's writer takes only
+    the last two.
+    """
+    budget = (
+        nullcontext() if request.ledger is None else publication_ledger.ledger_lock(request.ledger)
+    )
+    found = request.quarantine
+    chain = (
+        nullcontext()
+        if found is None
+        else publication_ledger.ledger_lock(BudgetLedger(found.store.root, found.store.ledger_id))
+    )
+    with budget, chain:
+        yield
 
 
 def _utc_now() -> datetime:
@@ -468,13 +491,17 @@ def _still_current(
     the evidence or the caller.
 
     Raises:
-        ForarbeiderRefusedError: ``release_not_eligible`` with ``stop_latch_set``,
+        ForarbeiderRefusedError: ``release_not_eligible`` with
+            ``authorization_stale:trust_root`` (the request's trust root, or its
+            witness authority's, is not the one the evidence was issued under),
+            ``stop_latch_set``,
             ``authorization_stale:stop_latch``, ``stop_control:<why>``,
             ``authorization_stale:control_history``, ``anchor:<family>:<status>`` or
             ``authorization_stale:reservation:<why>`` (AR5c: cancelled, settled,
             another batch, smaller than the batch, over the caps, another open one).
     """
     held = request.workspace
+    _same_root(request, evidence)
     if publication_attempts.latched(held):
         raise _not_eligible("stop_latch_set")
     if publication_attempts.latch_head(held)[1] != evidence.stop_latch_head_sha256:
@@ -491,6 +518,29 @@ def _still_current(
     reservation = publication_ledger.reservation_reasons(request, now)
     if reservation:
         raise _not_eligible(f"authorization_stale:reservation:{','.join(reservation)}")
+    _same_quarantine(request, evidence, now)
+
+
+def _same_root(request: ExecutionRequest, evidence: AuthorizationEvidence) -> None:
+    """The request's trust root, and its witness authority's, are the evidence's."""
+    roots = {request.root.sha256}
+    if request.anchoring is not None:
+        roots.add(request.anchoring.root.sha256)
+    if roots != {evidence.trust_root_sha256}:
+        raise _not_eligible("authorization_stale:trust_root")
+
+
+def _same_quarantine(
+    request: ExecutionRequest, evidence: AuthorizationEvidence, now: datetime
+) -> None:
+    """The anchored quarantine head is still the one the evidence was issued on."""
+    authority = publication_anchors.attempts_authority_of(request)
+    claim = QuarantineClaim(
+        request.inputs.settings.repository, (evidence.quarantine_sha256,), evidence.policy
+    )
+    found = quarantine_reasons((request.quarantine, authority), claim, now)
+    if found:
+        raise _not_eligible(f"authorization_stale:quarantine:{','.join(found)}")
 
 
 def _anchor_reasons(request: ExecutionRequest, policy_id: str | None) -> tuple[str, ...]:
