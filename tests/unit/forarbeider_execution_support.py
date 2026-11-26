@@ -45,6 +45,7 @@ from lovspor.forarbeider.publication_execute import (
 )
 from lovspor.forarbeider.publication_execution_models import AppIdentity, PublicationSettings
 from lovspor.forarbeider.publication_ledger import BudgetLedger, initialize_ledger
+from lovspor.forarbeider.publication_manifest_signature import sign_release_manifest
 from lovspor.forarbeider.publication_models import PublicationTransaction
 from lovspor.forarbeider.publication_prepare import PreparationRequest
 from lovspor.forarbeider.publication_quarantine import (
@@ -303,6 +304,7 @@ def make_rig(
     assert prepared.status == "prepared", prepared
     transaction = prepared.transaction
     assert transaction is not None and prepared.clone is not None
+    sign_release_manifest(prepared.clone, transaction, KeySigner(BOT, bot))  # §9.3 step 4
     sandbox = tmp / "sandbox"
     sandbox.mkdir(mode=0o700)
     remote = create_disposable_remote(sandbox, prepared.clone, base)

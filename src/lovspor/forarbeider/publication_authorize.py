@@ -36,14 +36,21 @@ it **itself**, at the time it is given, immediately before a publication:
 - ``path_identity``: the configured path is the transaction's, and on path A
   the transport's App identity is the pinned one;
 - ``bot_signature`` (path B): the local commit is the proposal from the base,
-  signed by the bot in the release namespace.
+  signed by the bot in the release namespace;
+- ``ar6_release_manifest_signature`` (AR6a, both paths, both modes): the
+  proposed manifest's exact bytes carry the bot's genuine detached signature,
+  bound to this transaction, the plan's policy and the configured repository
+  (:mod:`~lovspor.forarbeider.publication_manifest_signature`). On path A it
+  verifies the proposed bytes only, never a commit GitHub has not made; on
+  path B it is checked besides, never instead of, the local commit's signature.
+  No simulation may waive it.
 
 What no slice implements yet is ``unavailable``, never passed: the AR1 gate
 verdict (no passing state until D10, D11 and the lineage anchors),
 FC7b's pending blockers (D6, D10, D11, the missing integration and an
 unpinned trust root), in production the AR5 anchors of the control chain,
-the ledger and the quarantine (until AR7 provides a production witness), the
-AR6 manifest signature and the AR7 settings verification. Production needs
+the ledger and the quarantine (until AR7 provides a production witness), and
+the AR7 settings verification. Production needs
 every check passed, so it is denied; a simulation may waive exactly those, by
 name (:mod:`lovspor.forarbeider.publication_execution_models`).
 
@@ -78,6 +85,11 @@ from lovspor.forarbeider.publication_execution_models import (
     decide,
 )
 from lovspor.forarbeider.publication_ledger import BudgetLedger
+from lovspor.forarbeider.publication_manifest_signature import (
+    ManifestClaim,
+    ManifestSignature,
+    verify_proposed,
+)
 from lovspor.forarbeider.publication_models import ProposalCounts, PublicationTransaction
 from lovspor.forarbeider.publication_quarantine import (
     QuarantineClaim,
@@ -103,7 +115,6 @@ from lovspor.forarbeider.version_release_models import PolicyReference, digest_o
 #: What stays unavailable until its slice exists; each a separate, named check.
 _PENDING: tuple[tuple[CheckName, str], ...] = (
     ("ar1_gate_verdict", "ar1_gate_verdict_has_no_passing_state_before_d10_d11_and_anchors"),
-    ("ar6_release_manifest_signature", "release_manifest_signature_ar6_pending"),
     ("ar7_repository_settings", "repository_settings_unverified_ar7_pending"),
 )
 
@@ -157,6 +168,7 @@ class _Found(NamedTuple):
     ledger: LedgerEvidence
     remote_head: str | None
     fingerprint: str | None
+    manifest_signature: ManifestSignature
 
 
 def _check(name: CheckName, reasons: list[str] | tuple[str, ...]) -> AuthorizationCheck:
@@ -390,6 +402,19 @@ def _path_identity(context: AuthorizationContext) -> AuthorizationCheck:
     return _check("path_identity", reasons)
 
 
+def _manifest_signature(
+    context: AuthorizationContext, plan: ReleasePlan | None
+) -> tuple[AuthorizationCheck, ManifestSignature]:
+    """AR6a: the bot's signature on the proposed manifest's exact bytes; never waived."""
+    settings = context.inputs.settings
+    policy = None if plan is None else plan.basis.policy
+    claim = ManifestClaim(
+        context.inputs.transaction, policy, settings.repository, settings.bot_principal
+    )
+    found = verify_proposed(context.clone, claim, context.root, context.now)
+    return _check("ar6_release_manifest_signature", found.reasons), found
+
+
 def _bot_signature(context: AuthorizationContext) -> Iterator[AuthorizationCheck]:
     if context.inputs.transaction.content.publication.path != "B":
         return
@@ -410,14 +435,15 @@ def _checks(context: AuthorizationContext) -> tuple[list[AuthorizationCheck], _F
     limits_check, limits = _limits(context, plan)
     control_check, control = _control(context, plan)
     budget_check, ledger = _budget(context, limits)
+    manifest_check, manifest = _manifest_signature(context, plan)
     remote_check, head = _remote(context)
     latch = _check("stop_latch", ["stop_latch_set"] if _latched(context) else [])
     anchors = _control_anchor(context, plan)
     ledger_anchor = _ledger_anchor(context)
     found = [policy, pending, publisher, limits_check, control_check, latch, anchors, budget_check]
-    found += [ledger_anchor, _quarantine_anchor(context, plan)]
+    found += [ledger_anchor, _quarantine_anchor(context, plan), manifest_check]
     return [*_bindings(context, plan), *found, remote_check, *_execution(context)], _Found(
-        plan, limits, control, ledger, head, fingerprint
+        plan, limits, control, ledger, head, fingerprint, manifest
     )
 
 
@@ -510,6 +536,7 @@ def _bound(context: AuthorizationContext, found: _Found) -> dict[str, object]:
         "local_commit": context.facts.local_commit,
         "checked_at": context.now,
         "stop_latch_head_sha256": _latch_head(context),
+        "release_manifest_signature_sha256": found.manifest_signature.signature_sha256,
     }
 
 

@@ -6,8 +6,13 @@ publication: one parent, the base; the signature class the path requires
 root lists, in the release namespace, at the commit's stated time); the
 transaction's message; exactly the proposed files with their SHA-256; and one
 release manifest, named by its digest, that binds this transaction's plan,
-batch, path and policy and lists every other changed file. The manifest's own
-bot signature is AR6: it stays ``unavailable``, waived in simulation only.
+batch, path and policy and lists every other changed file; and (AR6a) the
+manifest's own bot signature: the published manifest bytes verified against the
+detached signature the runner holds, with the same verifier as before the send
+(:mod:`~lovspor.forarbeider.publication_manifest_signature`), at the attempt's
+time. A signature that fails is ``failed``; none held is ``unavailable``
+(publishing it with the commit is AR6b) and is no longer waived, so neither is
+ever ``integrity_verified``.
 
 **Authorization** asks a different question: did the policy hold at the
 publication event? Its evidence is (i) the runner's ``prepared_to_send``
@@ -39,9 +44,13 @@ from lovspor.forarbeider.policy_authorization import (
     verify_authorization,
 )
 from lovspor.forarbeider.policy_authorization_models import ApprovalRevocation
-from lovspor.forarbeider.policy_trust import TrustRoot
+from lovspor.forarbeider.policy_trust import SignedBytes, TrustRoot
 from lovspor.forarbeider.publication_authorize import AuthorizationInputs
 from lovspor.forarbeider.publication_execution_models import AttemptRecord
+from lovspor.forarbeider.publication_manifest_signature import (
+    ManifestClaim,
+    verify_manifest_signature,
+)
 from lovspor.forarbeider.publication_models import RELEASE_FILE, ReleaseManifestFile
 from lovspor.forarbeider.publication_path_a import body, headline
 from lovspor.forarbeider.publication_recovery_models import (
@@ -141,10 +150,42 @@ def _manifest(commit: RemoteCommit, inputs: AuthorizationInputs) -> list[str]:
     return reasons
 
 
+def manifest_signature_check(
+    commit: RemoteCommit,
+    inputs: AuthorizationInputs,
+    trust: tuple[TrustRoot, datetime],
+    held: bytes | None,
+) -> IntegrityCheck:
+    """AR6a: the published manifest's bytes carry the bot's signature the runner holds."""
+    name: Final = "ar6_release_manifest_signature"
+    raw = commit.files.get(inputs.transaction.content.release_manifest_path)
+    if raw is None:
+        return IntegrityCheck(name=name, status="failed", reasons=("manifest_not_published",))
+    if held is None:
+        return IntegrityCheck(
+            name=name, status="unavailable", reasons=("manifest_signature_not_held_ar6b_pending",)
+        )
+    plan = sealed_plan(inputs)
+    settings = inputs.settings
+    claim = ManifestClaim(
+        inputs.transaction,
+        plan.basis.policy if plan is not None else None,
+        settings.repository,
+        settings.bot_principal,
+    )
+    root, at = trust
+    # A bot key revoked since fails, as the path B commit's ``signature_class`` does
+    # in practice (``ssh-keygen -r``); fail-closed, never integrity-verified.
+    found = verify_manifest_signature(claim, SignedBytes(raw, held), root, at)
+    return _check(name, list(found.reasons))
+
+
 def integrity_checks(
-    commit: RemoteCommit, inputs: AuthorizationInputs
+    commit: RemoteCommit,
+    inputs: AuthorizationInputs,
+    manifest_signature: IntegrityCheck | None = None,
 ) -> tuple[IntegrityCheck, ...]:
-    """§9.3a 2a, every check, each passed, failed or unavailable."""
+    """§9.3a 2a, every check, each passed, failed or unavailable; unchecked is never passed."""
     base = inputs.transaction.content.publication.base_commit
     message = [] if ours(commit, inputs) else ["message_not_the_transactions"]
     return (
@@ -153,10 +194,11 @@ def integrity_checks(
         _check("message", message),
         _check("files", _files(commit, inputs)),
         _check("manifest", _manifest(commit, inputs)),
-        IntegrityCheck(
+        manifest_signature
+        or IntegrityCheck(
             name="ar6_release_manifest_signature",
             status="unavailable",
-            reasons=("not_signed_ar6_pending",),
+            reasons=("manifest_signature_not_checked",),
         ),
     )
 

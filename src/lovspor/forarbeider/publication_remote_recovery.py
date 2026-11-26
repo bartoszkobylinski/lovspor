@@ -66,11 +66,14 @@ from lovspor.forarbeider.publication_integrity import (
     Verdict,
     authorization,
     integrity_checks,
+    manifest_signature_check,
     ours,
 )
 from lovspor.forarbeider.publication_ledger import Settlement
+from lovspor.forarbeider.publication_manifest_signature import held_signature
 from lovspor.forarbeider.publication_recovery_models import (
     Classification,
+    IntegrityCheck,
     RecoveryReceipt,
     classification_of,
     integrity_of,
@@ -162,13 +165,31 @@ def _authorization_fields(verdict: Verdict) -> dict[str, Any]:
     }
 
 
+def _held(request: ExecutionRequest) -> bytes | None:
+    """The manifest signature the runner holds; an unsafe one is no signature (fails)."""
+    try:
+        return held_signature(request.clone)
+    except ForarbeiderRefusedError:
+        return b""
+
+
+def _signature(
+    request: ExecutionRequest, commit: RemoteCommit, verdict: Verdict, at: datetime
+) -> IntegrityCheck:
+    """AR6a, at the attempt's time when there is one, else the remote's, else recovery's."""
+    attempt = verdict.attempt
+    when = attempt.recorded_at if attempt else (commit.event_at or at)
+    return manifest_signature_check(commit, request.inputs, (request.root, when), _held(request))
+
+
 def _draft(
-    request: ExecutionRequest, commit: RemoteCommit, records: list[AttemptRecord]
+    request: ExecutionRequest, commit: RemoteCommit, records: list[AttemptRecord], at: datetime
 ) -> dict[str, Any]:
     """Every receipt field but its place in the chain, from verified facts only."""
     content = request.inputs.transaction.content
-    integrity, waived = integrity_of(checks := integrity_checks(commit, request.inputs))
     verdict = _verdict(request, commit, records)
+    checks = integrity_checks(commit, request.inputs, _signature(request, commit, verdict, at))
+    integrity, waived = integrity_of(checks)
     mine = ours(commit, request.inputs)
     return _authorization_fields(verdict) | {
         "transaction_id": request.inputs.transaction.transaction_id,
@@ -188,12 +209,15 @@ def _draft(
 
 
 def _drafts(
-    request: ExecutionRequest, commits: tuple[RemoteCommit, ...], records: list[AttemptRecord]
+    request: ExecutionRequest,
+    commits: tuple[RemoteCommit, ...],
+    records: list[AttemptRecord],
+    at: datetime,
 ) -> list[dict[str, Any]]:
     """The first commit, and after a publication the next one; recovery stops at a halt."""
     drafts: list[dict[str, Any]] = []
     for commit in commits:
-        draft = _draft(request, commit, records)
+        draft = _draft(request, commit, records, at)
         if drafts:
             draft = draft | {"ours": False, "classification": "halted_foreign_commit"}
         drafts.append(draft)
@@ -382,7 +406,7 @@ def _recover(request: ExecutionRequest, environment: Simulation, reader: Reader)
     if found.broken is not None:
         _halt(request, (f"remote_history_unverifiable:{found.broken}",), at)
         return RecoveryOutcome("halted_history_unverifiable", None, None, (found.broken,))
-    drafts = _drafts(request, found.commits, records)
+    drafts = _drafts(request, found.commits, records, at)
     reconciled = _reconcile(request, drafts, at)
     if not reconciled:
         return _not_published(request, at)
