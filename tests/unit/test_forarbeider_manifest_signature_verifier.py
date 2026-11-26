@@ -17,11 +17,11 @@ from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from lovspor.forarbeider.policy_trust import RELEASE_NAMESPACE, SignedBytes
 from lovspor.forarbeider.publication_execute import execute
 from lovspor.forarbeider.publication_manifest_signature import (
-    SIGNATURE,
     ManifestClaim,
     held_signature,
     manifest_bytes,
     sign_release_manifest,
+    signature_path,
     verify_manifest_signature,
     verify_proposed,
 )
@@ -42,6 +42,14 @@ from tests.unit.test_forarbeider_publication_stale_authorization import Adapters
 @pytest.fixture(params=["A", "B"])
 def rig(request: pytest.FixtureRequest, tmp_path: Path) -> Rig:
     return make_rig(tmp_path / request.param.lower(), request.param)
+
+
+def record(rig: Rig) -> Path:
+    return rig.clone / signature_path(rig.transaction.content.release_manifest_sha256)
+
+
+def held(rig: Rig) -> bytes | None:
+    return held_signature(rig.clone, rig.transaction.content.release_manifest_sha256)
 
 
 def claim_of(rig: Rig, transaction: PublicationTransaction | None = None, **changes: Any) -> Any:
@@ -180,12 +188,14 @@ def test_an_empty_signature_is_missing(rig: Rig) -> None:
 
 
 def test_the_held_signature_is_private_and_over_the_exact_bytes(rig: Rig) -> None:
-    path = rig.clone / SIGNATURE
+    path = record(rig)
     assert path.stat().st_mode & 0o777 == 0o600
-    held = held_signature(rig.clone)
-    assert held is not None
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+    found = held(rig)
+    assert found is not None
     data = manifest_bytes(rig.clone, rig.transaction)
-    assert verify_manifest_signature(claim_of(rig), SignedBytes(data, held), rig.root, NOW).verified
+    signed = SignedBytes(data, found)
+    assert verify_manifest_signature(claim_of(rig), signed, rig.root, NOW).verified
 
 
 def test_only_a_prepared_proposal_of_this_transaction_is_signed(rig: Rig) -> None:
@@ -200,9 +210,9 @@ def test_only_a_prepared_proposal_of_this_transaction_is_signed(rig: Rig) -> Non
 def test_a_crash_while_signing_leaves_no_signature_and_a_retry_signs(
     rig: Rig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (rig.clone / SIGNATURE).unlink()
+    record(rig).unlink()
 
-    def crash(git: int) -> None:
+    def crash(records: int, name: str) -> None:
         raise SimulatedCrash
 
     monkeypatch.setattr(publication_manifest_signature, "renamed", crash)
@@ -210,14 +220,14 @@ def test_a_crash_while_signing_leaves_no_signature_and_a_retry_signs(
         sign_release_manifest(rig.clone, rig.transaction, KeySigner(BOT, rig.bot))
     monkeypatch.undo()
 
-    assert held_signature(rig.clone) is None
+    assert held(rig) is None
     assert execute(rig.request(), Adapters(rig).at(NOW)).status == "denied"
     sign_release_manifest(rig.clone, rig.transaction, KeySigner(BOT, rig.bot))
     assert execute(rig.request(), Adapters(rig).at(NOW)).status == "published"
 
 
 def test_a_linked_signature_is_unreadable_never_followed(rig: Rig) -> None:
-    path = rig.clone / SIGNATURE
+    path = record(rig)
     target = rig.tmp / "elsewhere.sig"
     target.write_bytes(path.read_bytes())
     path.unlink()
@@ -235,3 +245,11 @@ def test_a_changed_proposed_manifest_is_not_the_proposal(rig: Rig) -> None:
     found = verify_proposed(rig.clone, claim_of(rig), rig.root, NOW)
 
     assert found.reasons == ("manifest_bytes_not_the_proposal",)
+
+
+@pytest.mark.parametrize("name", ["../journal", "A" * 64, "a" * 63, ""])
+def test_a_record_is_named_only_by_a_manifest_digest(rig: Rig, name: str) -> None:
+    with pytest.raises(ForarbeiderRefusedError) as raised:
+        held_signature(rig.clone, name)
+
+    assert raised.value.detail == "manifest_signature_name"

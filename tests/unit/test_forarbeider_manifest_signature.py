@@ -4,7 +4,8 @@ Every case runs on paths A and B with real ``ssh-keygen`` signatures, never a
 mocked verdict. The signature is detached: the exact bytes of
 ``releases/<sha256>.json`` in the prepared clone, signed by the bot key the trust
 root lists, in ``lovspor-forarbeider-release``, and kept beside the preparation
-journal (``.git/lovspor-release-manifest.sig``), never in the published tree.
+journal, one record per manifest digest
+(``.git/lovspor-release-manifest-signatures/<sha256>.sig``), never in the published tree.
 
 Before the send, ``ar6_release_manifest_signature`` is a real check that no
 simulation may waive: a missing, malformed, foreign, owner-signed, wrongly
@@ -37,6 +38,7 @@ from lovspor.forarbeider.publication_execute import (
     execute,
     publish_authorized,
 )
+from lovspor.forarbeider.publication_manifest_signature import signature_path
 from lovspor.forarbeider.publication_remote_recovery import recover
 from lovspor.forarbeider.publication_sandbox import SimulatedCrash
 from tests.unit.forarbeider_authorization_support import Key, sign, signer_line, trust_root
@@ -56,7 +58,6 @@ from tests.unit.test_forarbeider_publication_stale_authorization import (
     refused,
 )
 
-SIGNATURE = ".git/lovspor-release-manifest.sig"
 CHECK = "ar6_release_manifest_signature"
 T2 = NOW + timedelta(seconds=30)
 
@@ -73,9 +74,14 @@ def manifest_of(rig: Rig) -> bytes:
     return (rig.clone / rig.transaction.content.release_manifest_path).read_bytes()
 
 
+def record(rig: Rig) -> Path:
+    """The manifest's own signature record in the clone."""
+    return rig.clone / signature_path(rig.transaction.content.release_manifest_sha256)
+
+
 def hold(rig: Rig, signature: bytes) -> None:
-    """Put ``signature`` where the runner keeps the manifest's detached signature."""
-    path = rig.clone / SIGNATURE
+    """Put ``signature`` where the runner records the manifest's detached signature."""
+    path = record(rig)
     path.unlink(missing_ok=True)
     path.write_bytes(signature)
     path.chmod(0o600)
@@ -169,7 +175,7 @@ def test_a_restart_rebuilds_every_input_and_still_verifies(rig: Rig) -> None:
 
 
 def test_a_missing_signature_denies_before_anything_is_sent(rig: Rig) -> None:
-    (rig.clone / SIGNATURE).unlink(missing_ok=True)
+    record(rig).unlink(missing_ok=True)
     adapters = Adapters(rig)
 
     outcome = execute(rig.request(), adapters.at(NOW))
@@ -269,7 +275,7 @@ def test_evidence_issued_on_a_signature_that_changed_is_stale(rig: Rig, change: 
     adapters = Adapters(rig)
     evidence = authorized(rig.request(), adapters.at(NOW))
     if change == "removed":
-        (rig.clone / SIGNATURE).unlink()
+        record(rig).unlink()
     else:
         hold(rig, signed(rig, rig.stranger))
 
@@ -280,7 +286,7 @@ def test_evidence_issued_on_a_signature_that_changed_is_stale(rig: Rig, change: 
 
 
 def test_a_denied_attempt_retried_once_signed_publishes_exactly_once(rig: Rig) -> None:
-    (rig.clone / SIGNATURE).unlink(missing_ok=True)
+    record(rig).unlink(missing_ok=True)
     adapters = Adapters(rig)
     assert execute(rig.request(), adapters.at(NOW)).status == "denied"
     genuine(rig)
@@ -342,7 +348,7 @@ def test_a_published_commit_whose_manifest_signature_fails_is_never_integrity_va
 ) -> None:
     adapters = published(rig)
     if change == "removed":
-        (rig.clone / SIGNATURE).unlink()
+        record(rig).unlink()
     else:
         hold(rig, signed(rig, rig.stranger))
 

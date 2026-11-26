@@ -7,13 +7,23 @@ Nothing is added, stripped or re-serialized before signing.
 
 **Where the signature lives.** Detached, never inside the manifest and never in
 the published tree: the manifest's digest, and so the transaction id, do not
-depend on it, so there is no circularity and no digest changes meaning. It is
-kept beside the preparation journal in the AR4a clone,
-``.git/lovspor-release-manifest.sig``, written atomically by
-:func:`sign_release_manifest`. The manifest field ``signature`` keeps its v1
-constant: the manifest bytes embed no signature. Publishing the signature with
-the commit, so that a reader or an auditor can verify it, is AR6b's evidence
-contract; until then only the runner, which holds it, can.
+depend on it, so there is no circularity and no digest changes meaning. Each
+manifest has its own record, named by its digest, in the AR4a clone's ``.git``:
+``.git/lovspor-release-manifest-signatures/<release_manifest_sha256>.sig``. A
+clone is not one transaction's for good (it is chosen by batch and path, and a
+rolled-back proposal makes room for another), so one shared file would let a
+later signing replace an earlier publication's evidence; a record per digest
+cannot. Records are **create-only**: :func:`sign_release_manifest` writes a
+private ``.next`` file, syncs it and renames it into place under the clone's
+lock, only when no record is there. Signing the same manifest again returns the
+record when it holds exactly the new signature (an Ed25519 SSHSIG over the same
+bytes with the same key is the same bytes); any other existing record is never
+replaced (``manifest_signature_exists``). The manifest field ``signature`` keeps
+its v1 constant: the manifest bytes embed no signature. Publishing the
+signature with the commit, so that a reader or an auditor can verify it, is
+AR6b's evidence contract; until then only the runner, which holds the clone,
+can, and a clone that is gone takes its evidence with it (recovery then fails
+closed).
 
 **How it binds.** The manifest names the repository, the path and its base
 commit, the plan, the batch and its sequence, the quarantine set, the policy,
@@ -36,6 +46,9 @@ No owner key is involved; nothing here invents cryptography.
 
 import json
 import os
+import re
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -54,11 +67,18 @@ from lovspor.forarbeider.policy_trust import (
 )
 from lovspor.forarbeider.publication_models import PublicationTransaction, ReleaseManifestFile
 from lovspor.forarbeider.publication_path_b import Signer
+from lovspor.forarbeider.release_lock import recovered_lock
 from lovspor.forarbeider.version_models import canonical_text
 from lovspor.forarbeider.version_release_models import PolicyReference
 
-SIGNATURE = ".git/lovspor-release-manifest.sig"
-_NAME = Path(SIGNATURE).name
+SIGNATURES = ".git/lovspor-release-manifest-signatures"
+_DIRECTORY = Path(SIGNATURES).name
+_DIGEST = re.compile(r"[0-9a-f]{64}")
+
+
+def signature_path(manifest_sha256: str) -> str:
+    """The clone-relative record of the signature on the manifest with this digest."""
+    return f"{SIGNATURES}/{manifest_sha256}.sig"
 
 
 class ManifestClaim(NamedTuple):
@@ -105,44 +125,90 @@ def manifest_bytes(clone: Path, transaction: PublicationTransaction) -> bytes:
     return data
 
 
-def renamed(git: int) -> None:
-    """The step that makes the signature visible: one rename (a test may stand in to crash)."""
-    os.replace(f"{_NAME}.next", _NAME, src_dir_fd=git, dst_dir_fd=git)
+def _name(manifest_sha256: str) -> str:
+    if not _DIGEST.fullmatch(manifest_sha256):
+        raise _refused("manifest_signature_name")
+    return f"{manifest_sha256}.sig"
+
+
+@contextmanager
+def _records(clone: Path, create: bool) -> Iterator[int]:
+    """The private directory of signature records, made on first use when ``create``."""
+    with directory(clone / ".git", "manifest_signature") as git:
+        if create:
+            with suppress(FileExistsError):
+                os.mkdir(_DIRECTORY, 0o700, dir_fd=git)
+        with directory(Path(_DIRECTORY), "manifest_signature", git) as records:
+            yield records
+
+
+def renamed(records: int, name: str) -> None:
+    """The step that makes a record visible: one rename (a test may stand in to crash)."""
+    os.replace(f"{name}.next", name, src_dir_fd=records, dst_dir_fd=records)
+
+
+def _created(records: int, name: str, signature: bytes) -> None:
+    write_leaf(records, f"{name}.next", signature, "manifest_signature")
+    descriptor = os.open(f"{name}.next", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=records)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    renamed(records, name)
+    os.fsync(records)
+
+
+def _existing(records: int, name: str) -> bytes | None:
+    try:
+        return read_leaf(records, name, "manifest_signature")
+    except FileNotFoundError:
+        return None
 
 
 def sign_release_manifest(
     clone: Path, transaction: PublicationTransaction, signer: Signer
 ) -> bytes:
-    """§9.3 step 4: sign the prepared manifest's exact bytes and keep the signature, atomically.
+    """§9.3 step 4: sign the prepared manifest's exact bytes and record it, create-only.
 
     Only a ``prepared`` journal of exactly this transaction, whose read-back
-    still proves every byte, is signed. Signing again replaces the signature.
+    still proves every byte, is signed. The record is named by the manifest's
+    digest and written under the clone's lock; a record already there is kept
+    when it is exactly this signature and never replaced otherwise.
 
     Raises:
-        ForarbeiderRefusedError: ``release_not_eligible: manifest_not_prepared`` or
-            ``manifest_bytes``; the read-back's own refusals; ``unsafe_output_path``.
+        ForarbeiderRefusedError: ``release_not_eligible: manifest_not_prepared``,
+            ``manifest_bytes`` or ``manifest_signature_exists``; the read-back's own
+            refusals; ``corpus_locked`` while another process holds the clone;
+            ``unsafe_output_path``.
     """
-    journal = publication_stage.pending_journal(clone)
-    if journal is None or journal.state != "prepared" or journal.transaction != transaction:
-        raise _refused("manifest_not_prepared")
-    publication_stage.verify_proposal(clone, transaction)
-    signature = signer.sign(manifest_bytes(clone, transaction), RELEASE_NAMESPACE)
-    with directory(clone / ".git", "manifest_signature") as git:
-        write_leaf(git, f"{_NAME}.next", signature, "manifest_signature")
-        renamed(git)
+    name = _name(transaction.content.release_manifest_sha256)
+    with recovered_lock(clone):
+        journal = publication_stage.pending_journal(clone)
+        if journal is None or journal.state != "prepared" or journal.transaction != transaction:
+            raise _refused("manifest_not_prepared")
+        publication_stage.verify_proposal(clone, transaction)
+        signature = signer.sign(manifest_bytes(clone, transaction), RELEASE_NAMESPACE)
+        with _records(clone, create=True) as records:
+            held = _existing(records, name)
+            if held is None:
+                _created(records, name, signature)
+            elif held != signature:
+                raise _refused("manifest_signature_exists")
     return signature
 
 
-def held_signature(clone: Path) -> bytes | None:
-    """The detached signature the runner keeps, ``None`` when it keeps none.
+def held_signature(clone: Path, manifest_sha256: str) -> bytes | None:
+    """The recorded signature on the manifest with this digest, ``None`` when there is none.
 
     Raises:
         ForarbeiderRefusedError: ``unsafe_output_path`` for a link, a file others
-            can write or one over the size bound.
+            can write or one over the size bound; ``manifest_signature_name`` for a
+            digest that is not one.
     """
+    name = _name(manifest_sha256)
     try:
-        with directory(clone / ".git", "manifest_signature") as git:
-            return read_leaf(git, _NAME, "manifest_signature")
+        with _records(clone, create=False) as records:
+            return _existing(records, name)
     except FileNotFoundError:
         return None
 
@@ -227,9 +293,9 @@ def verify_manifest_signature(
 def verify_proposed(
     clone: Path, claim: ManifestClaim, root: TrustRoot, at: datetime
 ) -> ManifestSignature:
-    """The verifier on the proposed bytes: the clone's manifest and the signature held for it."""
+    """The verifier on the proposed bytes: the clone's manifest and its own signature record."""
     try:
-        held = held_signature(clone)
+        held = held_signature(clone, claim.transaction.content.release_manifest_sha256)
     except ForarbeiderRefusedError:
         return ManifestSignature(("manifest_signature_unreadable",), None, None)
     try:

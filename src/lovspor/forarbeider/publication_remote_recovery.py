@@ -166,9 +166,10 @@ def _authorization_fields(verdict: Verdict) -> dict[str, Any]:
 
 
 def _held(request: ExecutionRequest) -> bytes | None:
-    """The manifest signature the runner holds; an unsafe one is no signature (fails)."""
+    """This manifest's own signature record; an unsafe one is no signature (fails)."""
+    digest = request.inputs.transaction.content.release_manifest_sha256
     try:
-        return held_signature(request.clone)
+        return held_signature(request.clone, digest)
     except ForarbeiderRefusedError:
         return b""
 

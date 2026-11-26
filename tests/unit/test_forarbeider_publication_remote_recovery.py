@@ -432,7 +432,7 @@ def _failed(rig: Rig, commit: RemoteCommit) -> dict[str, tuple[str, ...]]:
 
 def test_the_exact_proposal_passes_every_integrity_check(rig_a: Rig) -> None:
     commit = _remote_commit(rig_a)
-    held = held_signature(rig_a.clone)
+    held = held_signature(rig_a.clone, rig_a.transaction.content.release_manifest_sha256)
     signature = manifest_signature_check(commit, rig_a.inputs, (rig_a.root, NOW), held)
     checks = integrity_checks(commit, rig_a.inputs, signature)
 
