@@ -25,6 +25,7 @@ from typing import Any
 import pytest
 
 from lovspor.forarbeider import publication_anchors, publication_ledger
+from lovspor.forarbeider.control_plane_witness import OfflineAnchorWitness
 from lovspor.forarbeider.errors import ForarbeiderRefusedError
 from lovspor.forarbeider.publication_execute import execute
 from lovspor.forarbeider.publication_quarantine import (
@@ -38,11 +39,13 @@ from lovspor.forarbeider.quarantine_succession import (
     SuccessionRequest,
     append_successor,
     initialize_quarantine,
+    policies_of,
+    read_quarantine,
 )
 from lovspor.forarbeider.quarantine_succession_models import document_sha256
 from lovspor.forarbeider.release_quarantine import EMPTY_LEDGER, merge
 from lovspor.forarbeider.release_quarantine_run import ExceptionMaterial
-from tests.unit.forarbeider_execution_support import NOW, Rig, make_rig
+from tests.unit.forarbeider_execution_support import NOW, KeySigner, Rig, make_rig
 from tests.unit.forarbeider_release_control_support import policy_bytes
 from tests.unit.test_forarbeider_quarantine_integration import (
     batch_finding,
@@ -58,7 +61,7 @@ from tests.unit.test_forarbeider_quarantine_integration import (
     reasons_of,
     remote_unchanged,
 )
-from tests.unit.test_forarbeider_quarantine_succession import REPOSITORY
+from tests.unit.test_forarbeider_quarantine_succession import REPOSITORY, WITNESS
 from tests.unit.test_forarbeider_quarantine_succession import Rig as ChainRig
 
 __all__ = ["chain", "chain_keys", "chain_witness", "planner"]
@@ -208,3 +211,33 @@ def test_a_foreign_chain_never_plans_what_the_publications_chain_quarantines(
         return
 
     assert {d for batch in batches(result) for d in batch} <= governed
+
+
+# --- why a binding of identifiers alone would be a sham guard (#1037) ----------------------------
+
+
+def test_a_chain_id_alone_never_identifies_the_source(chain: ChainRig, planner: Any) -> None:
+    """The same ledger id, witness key and root on another store verify with other content.
+
+    So an owner-signed binding that names only the ledger and quarantine ids
+    could be satisfied by a second store under the publication's own ids. The
+    binding needs one designated anchor authority (the bootstrap contract in
+    §9.9, #1037) before any guard is built on it.
+    """
+    store, rows = planner
+    quarantined_two(chain, store, rows)
+    directory = chain.tmp / "another-witness-store"
+    directory.mkdir(mode=0o700)
+    another = chain.authority(
+        witness=OfflineAnchorWitness(directory, KeySigner(WITNESS, chain.witness_key))
+    )
+    same_id = QuarantineStore(chain.tmp / "quarantine-again", chain.store.ledger_id)
+    assert initialize_quarantine(same_id, REPOSITORY, another).status == "verified"
+    policies = policies_of(policy_bytes())
+
+    own = read_quarantine(chain.store, REPOSITORY, chain.authority(), policies)
+    other = read_quarantine(same_id, REPOSITORY, another, policies)
+
+    assert same_id.ledger_id == chain.store.ledger_id
+    assert len(own.ledger.records) == 1
+    assert other.ledger.records == ()
