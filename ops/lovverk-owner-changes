@@ -7,3 +7,4 @@
 # <lovverk commit, 40 lowercase hex> <lovverk PR number> <attempt> <reason>
 #
 # A pull request that changes this file changes nothing else.
+3debcc33e99738a43f3508c797c0a367238ab277 31 1 extractor v15 migration of lf-20081219-1456, first end-to-end pin
