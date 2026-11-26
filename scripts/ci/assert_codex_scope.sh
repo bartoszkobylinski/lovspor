@@ -62,6 +62,7 @@ PROTECTED_PATTERNS=(
   "tests/unit/test_forarbeider_corpus_golden.py"
   "tests/unit/test_site_routes.py"
   "tests/unit/test_agentic_ci_scripts.py"
+  "tests/unit/test_add_only_contract.py"
 )
 
 protected=()

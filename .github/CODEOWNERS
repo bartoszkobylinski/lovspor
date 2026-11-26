@@ -34,3 +34,4 @@
 /tests/unit/test_forarbeider_corpus_golden.py    @bartoszkobylinski
 /tests/unit/test_site_routes.py                  @bartoszkobylinski
 /tests/unit/test_agentic_ci_scripts.py           @bartoszkobylinski
+/tests/unit/test_add_only_contract.py            @bartoszkobylinski
