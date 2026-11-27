@@ -389,6 +389,9 @@ _PROTECTED_GATE = "tests/unit/test_site_routes.py"
 # This module: the guard's own tests, so an agent cannot weaken the checks that
 # keep PROTECTED_PATTERNS and CODEOWNERS in step.
 _PROTECTED_GUARD_TESTS = "tests/unit/test_agentic_ci_scripts.py"
+# The ADD-ONLY gate module (G1-G7): its assertions are as much the contract as
+# the goldens under tests/fixtures/add_only/ that it reads.
+_PROTECTED_ADD_ONLY_GATE = "tests/unit/test_add_only_contract.py"
 
 
 def _protected_patterns() -> list[str]:
@@ -410,7 +413,10 @@ def _scope_repo_with(tmp_path: Path, *relative: str) -> tuple[Path, str]:
 
 @pytest.mark.parametrize("lane", [(), ("remediation",)])
 @pytest.mark.parametrize("state", ["committed", "staged", "unstaged"])
-@pytest.mark.parametrize("protected", [_PROTECTED_GOLDEN, _PROTECTED_GATE, _PROTECTED_GUARD_TESTS])
+@pytest.mark.parametrize(
+    "protected",
+    [_PROTECTED_GOLDEN, _PROTECTED_GATE, _PROTECTED_GUARD_TESTS, _PROTECTED_ADD_ONLY_GATE],
+)
 def test_scope_guard_refuses_editing_a_preservation_contract(
     tmp_path: Path, protected: str, state: str, lane: tuple[str, ...]
 ) -> None:
@@ -429,15 +435,18 @@ def test_scope_guard_refuses_editing_a_preservation_contract(
     assert f"  {protected}\n" in result.stderr
 
 
-@pytest.mark.parametrize("protected", [_PROTECTED_GOLDEN, _PROTECTED_GATE])
+@pytest.mark.parametrize("lane", [(), ("remediation",)])
+@pytest.mark.parametrize(
+    "protected", [_PROTECTED_GOLDEN, _PROTECTED_GATE, _PROTECTED_ADD_ONLY_GATE]
+)
 def test_scope_guard_refuses_deleting_a_preservation_contract(
-    tmp_path: Path, protected: str
+    tmp_path: Path, protected: str, lane: tuple[str, ...]
 ) -> None:
     repo, base = _scope_repo_with(tmp_path, protected)
     _git(repo, "rm", "--quiet", protected)
     _git(repo, "commit", "--quiet", "-m", "drop")
 
-    result = _run_scope_guard(repo, base)
+    result = _run_scope_guard(repo, base, *lane)
 
     assert result.returncode == 1
     assert f"  {protected}\n" in result.stderr
@@ -469,6 +478,7 @@ def test_scope_guard_refuses_adding_under_a_golden_directory(tmp_path: Path, add
         "tests/unit/test_mcp_existing_calls_local.py",
         "tests/fixtures/forarbeider/prop-new.html",
         "tests/fixtures/add_only_notes.json",
+        "tests/unit/test_add_only_contract_more.py",
     ],
 )
 def test_scope_guard_still_allows_new_sibling_tests_and_fixtures(
@@ -476,7 +486,9 @@ def test_scope_guard_still_allows_new_sibling_tests_and_fixtures(
 ) -> None:
     """The protected list names contracts, not neighbourhoods: a new sibling
     module or fixture beside a pinned one is the agent's normal work."""
-    repo, base = _scope_repo_with(tmp_path, _PROTECTED_GOLDEN, _PROTECTED_GATE)
+    repo, base = _scope_repo_with(
+        tmp_path, _PROTECTED_GOLDEN, _PROTECTED_GATE, _PROTECTED_ADD_ONLY_GATE
+    )
     _write(repo, allowed)
 
     result = _run_scope_guard(repo, base)
@@ -501,13 +513,11 @@ def test_protected_patterns_are_all_codeowned() -> None:
 
 
 def test_protected_exact_paths_exist() -> None:
-    """A renamed golden would fall out of the guard without a sound; only the
-    add_only tree (#958, not yet created) may be absent."""
+    """A renamed golden would fall out of the guard without a sound."""
     missing = [
         pattern
         for pattern in _protected_patterns()
-        if pattern != "tests/fixtures/add_only/*"
-        and not (_REPO / pattern.removesuffix("*")).exists()
+        if not (_REPO / pattern.removesuffix("*")).exists()
     ]
 
     assert _protected_patterns(), "PROTECTED_PATTERNS block not found"

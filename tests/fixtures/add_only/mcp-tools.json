@@ -1,0 +1,83 @@
+{
+ "corpus_status": [
+  "dataset"
+ ],
+ "diff_law_versions": [
+  "date_a",
+  "date_b",
+  "slug"
+ ],
+ "get_eu_basis": [
+  "slug"
+ ],
+ "get_law": [
+  "slug"
+ ],
+ "get_law_at": [
+  "slug",
+  "target_date"
+ ],
+ "get_law_history": [
+  "slug"
+ ],
+ "get_observation_history": [
+  "document",
+  "include_text",
+  "observed_at"
+ ],
+ "get_section": [
+  "occurrence",
+  "recorded_at",
+  "section_id",
+  "slug"
+ ],
+ "get_temporal_events": [
+  "recorded_at",
+  "section_id",
+  "slug",
+  "valid_at"
+ ],
+ "list_law_versions": [
+  "slug"
+ ],
+ "list_recent_changes": [
+  "dataset",
+  "limit",
+  "since"
+ ],
+ "list_sections": [
+  "slug"
+ ],
+ "search_body": [
+  "dataset",
+  "limit",
+  "query",
+  "recorded_at"
+ ],
+ "search_eu_implementations": [
+  "eu_doc_id"
+ ],
+ "search_laws": [
+  "authority",
+  "dataset",
+  "limit",
+  "query"
+ ],
+ "semantic_search": [
+  "dataset",
+  "limit",
+  "min_score",
+  "query"
+ ],
+ "validate_citation": [
+  "citation",
+  "recorded_at"
+ ],
+ "verify_quote": [
+  "occurrence",
+  "quote",
+  "recorded_at",
+  "section_id",
+  "slug"
+ ]
+}
