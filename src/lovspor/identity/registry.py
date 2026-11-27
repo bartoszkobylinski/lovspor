@@ -95,6 +95,21 @@ class SlugOwner(BaseModel):
     basis: OwnershipBasis = FIRST_HOLDER
     prior_holders: tuple[PriorHolder, ...] = ()
 
+    @property
+    def served_owner_doc_id(self) -> str:
+        """The document the address serves (200) or names (301/410): ``owner`` (#921)."""
+        return self.owner
+
+    @property
+    def first_owner_doc_id(self) -> str:
+        """The first document that held the address: the oldest prior holder of a
+        ``threshold-exception``, else the owner (#921, ADR-0026 draft).
+
+        Derived, never written: ``slugs.json`` already records it immutably (the
+        entry is append-only as a whole), so its on-disk schema is unchanged.
+        """
+        return self.prior_holders[0].doc_id if self.prior_holders else self.owner
+
     @model_validator(mode="after")
     def _basis_matches_prior_holders(self) -> "SlugOwner":
         if (self.basis == THRESHOLD_EXCEPTION) != bool(self.prior_holders):
@@ -184,6 +199,16 @@ def ensure_append_only(prior: SlugRegistry, new: SlugRegistry) -> None:
                 )
 
 
+def _unique_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """A JSON object, refused when one key appears twice: which owner would count
+    then depends on the parser (``json.loads`` keeps the last), so it is no registry (#911)."""
+    data = dict(pairs)
+    if len(data) != len(pairs):
+        repeated = sorted({key for key, _ in pairs if sum(k == key for k, _ in pairs) > 1})
+        raise ValueError(f"duplicate key(s) {repeated[:5]}")
+    return data
+
+
 def read_registry(repo: Path) -> SlugRegistry | None:
     """The registry file as it is on disk, or ``None`` when there is none.
 
@@ -193,10 +218,16 @@ def read_registry(repo: Path) -> SlugRegistry | None:
     path = repo / REGISTRY_FILENAME
     if not path.exists():
         return None
+    return parse_registry(path.read_bytes(), str(path))
+
+
+def parse_registry(blob: bytes, where: str) -> SlugRegistry:
+    """A ``slugs.json`` blob as the registry, refusing a repeated key (``ParseError``)."""
     try:
-        return SlugRegistry.model_validate(json.loads(path.read_text(encoding="utf-8")))
-    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
-        raise ParseError(f"{path}: unreadable slug registry: {exc}") from exc
+        data = json.loads(blob.decode("utf-8"), object_pairs_hook=_unique_keys)
+        return SlugRegistry.model_validate(data)
+    except (UnicodeDecodeError, ValueError, ValidationError) as exc:
+        raise ParseError(f"{where}: unreadable slug registry: {exc}") from exc
 
 
 def registry_json(registry: SlugRegistry) -> str:

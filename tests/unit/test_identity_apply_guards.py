@@ -15,13 +15,16 @@ from lovspor.identity.apply_commands import identity_apply_impl, verified_plan_f
 from lovspor.identity.apply_guards import require_confined, require_pinned, require_safe_names
 from lovspor.identity.report import SUMS_FILENAME
 from tests.unit.identity_git_fixtures import commit_all, git
-from tests.unit.test_identity_apply_command import (
+from tests.unit.identity_owner_fixtures import allow_fixture_u1
+from tests.unit.test_identity_apply_command import (  # noqa: F401 (_owner_list: autouse)
     _apply,
     _invoke,
+    _owner_list,
     _pin,
     _plan,
     _status,
     _tagged,
+    plan_key,
 )
 
 
@@ -203,10 +206,11 @@ def test_require_pinned_returns_the_hashed_bytes(repo: Path, tmp_path: Path) -> 
 
 
 def test_an_os_error_while_writing_is_reported_as_partially_written(
-    repo: Path, tmp_path: Path
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A write failure (a read-only tree) is exit 3 with the documented summary, no traceback."""
     plan_dir = _plan(repo, tmp_path / "plan")
+    allow_fixture_u1(monkeypatch, repo, plan_key(repo, plan_dir))
     tree = [d for d in repo.rglob("*") if d.is_dir() and ".git" not in d.parts]
     for directory in [repo, *tree]:
         directory.chmod(0o555)

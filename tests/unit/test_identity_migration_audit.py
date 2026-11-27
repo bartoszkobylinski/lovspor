@@ -25,11 +25,13 @@ from lovspor.storage.manifest import read_manifest
 from tests.unit.identity_git_fixtures import (
     commit_all,
     doc_text,
+    git,
     init_repo,
     record,
     write_doc,
     write_manifest_json,
 )
+from tests.unit.identity_owner_fixtures import list_reassignments
 
 KEEP = "sf-20250101-0001"  # an ordinary current document
 X_OLD = "sf-20250101-0002"  # first holder of x, removed, record lost
@@ -105,11 +107,58 @@ def migrated(applied: tuple[Path, str]) -> Path:
     return applied[0]
 
 
-def test_the_applied_migration_passes_lovspor_audit(migrated: Path) -> None:
+def _approve_the_fixture_changes(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """List and approve the three owner changes this migration makes (#911, #921).
+
+    ``y`` and ``z`` go back to their first holders, ``x`` stays with its threshold
+    owner: the fail-closed owner gate refuses the corpus unless each is approved.
+    """
+    seed = git(repo, "rev-list", "--max-parents=0", "HEAD").strip()
+    served = git(repo, "log", "--format=%H", "--grep=add(forskrift): x", "-F", "HEAD").strip()
+    repairs = [
+        {
+            "directory": "forskrifter",
+            "slug": slug,
+            "from_doc_id": later,
+            "to_doc_id": first,
+            "kind": kind,
+            "reason": f"fixture: {slug} returns to its first holder",
+        }
+        for slug, later, first, kind in (
+            ("y", Y_LATER, Y_OWNER, "history-repair"),
+            ("z", Z_LATER, Z_OWNER, "u1-rename"),
+        )
+    ]
+    exception = {
+        "directory": "forskrifter",
+        "slug": "x",
+        "first_owner_doc_id": X_OLD,
+        "served_owner_doc_id": X_NEW,
+        "evidence": {"first_owner_first_commit": seed, "served_owner_first_commit": served},
+        "reason": "fixture: the threshold keeps X_NEW",
+    }
+    list_reassignments(monkeypatch, repo, repairs, [exception])
+
+
+def test_the_applied_migration_passes_lovspor_audit(
+    migrated: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _approve_the_fixture_changes(monkeypatch, migrated)
+
     result = CliRunner().invoke(app, ["audit", "--corpus-path", str(migrated)])
 
     assert result.exit_code == 0, result.output
     assert "duplicate_path_ownership" not in result.output
+
+
+def test_the_applied_migration_fails_the_audit_until_its_changes_are_approved(
+    migrated: Path,
+) -> None:
+    """The packaged list is pending, so an unlisted owner change is a blocking finding."""
+    result = CliRunner().invoke(app, ["audit", "--corpus-path", str(migrated)])
+
+    assert result.exit_code == 1
+    assert "identity_schema" in result.output
 
 
 def test_no_two_records_share_a_markdown_path(migrated: Path) -> None:
