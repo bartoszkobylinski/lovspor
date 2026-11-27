@@ -78,6 +78,7 @@ from lovspor.forarbeider.publication_execution_models import (
     AuthorizationEvidence,
 )
 from lovspor.forarbeider.publication_ledger import BudgetLedger
+from lovspor.forarbeider.publication_manifest_signature import ManifestClaim, verify_proposed
 from lovspor.forarbeider.publication_path_b import Signer
 from lovspor.forarbeider.publication_quarantine import (
     QuarantineClaim,
@@ -498,7 +499,11 @@ def _still_current(
             ``authorization_stale:stop_latch``, ``stop_control:<why>``,
             ``authorization_stale:control_history``, ``anchor:<family>:<status>`` or
             ``authorization_stale:reservation:<why>`` (AR5c: cancelled, settled,
-            another batch, smaller than the batch, over the caps, another open one).
+            another batch, smaller than the batch, over the caps, another open one),
+            ``authorization_stale:quarantine:<why>`` or
+            ``authorization_stale:manifest_signature:<why>`` (AR6a: the held
+            signature no longer verifies now, or is not the one the evidence was
+            issued on).
     """
     held = request.workspace
     _same_root(request, evidence)
@@ -519,6 +524,23 @@ def _still_current(
     if reservation:
         raise _not_eligible(f"authorization_stale:reservation:{','.join(reservation)}")
     _same_quarantine(request, evidence, now)
+    _same_manifest_signature(request, evidence, now)
+
+
+def _same_manifest_signature(
+    request: ExecutionRequest, evidence: AuthorizationEvidence, now: datetime
+) -> None:
+    """AR6a: the held manifest signature still verifies now, and is the evidence's."""
+    settings = request.inputs.settings
+    claim = ManifestClaim(
+        request.inputs.transaction, evidence.policy, settings.repository, settings.bot_principal
+    )
+    found = verify_proposed(request.clone, claim, request.root, now)
+    reasons = list(found.reasons)
+    if found.signature_sha256 != evidence.release_manifest_signature_sha256:
+        reasons.append("not_the_evidences")
+    if reasons:
+        raise _not_eligible(f"authorization_stale:manifest_signature:{','.join(reasons)}")
 
 
 def _same_root(request: ExecutionRequest, evidence: AuthorizationEvidence) -> None:

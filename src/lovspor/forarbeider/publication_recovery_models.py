@@ -36,8 +36,8 @@ IntegrityName = Literal[
     "manifest",
     "ar6_release_manifest_signature",
 ]
-#: Integrity checks a simulation may waive, each listed; AR6 signs manifests.
-WAIVABLE_INTEGRITY: Final[frozenset[str]] = frozenset({"ar6_release_manifest_signature"})
+#: Integrity checks a simulation may waive: none since AR6a verifies the manifest signature.
+WAIVABLE_INTEGRITY: Final[frozenset[str]] = frozenset()
 Integrity = Literal["integrity_verified", "integrity_failed"]
 Authorization = Literal["authorized", "unauthorized", "authorization_unknown"]
 Classification = Literal[

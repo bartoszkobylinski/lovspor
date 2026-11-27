@@ -18,8 +18,9 @@ never passed.** The decision follows from the checks alone; no caller field
 can set it:
 
 - ``denied``: any check failed, or the mode is production. Production needs
-  every check passed, and the AR5-AR7 checks (:data:`AR5_TO_AR7_CHECKS`) have
-  no implementation, so production is always denied today;
+  every check passed, and the AR5 anchors and the AR7 settings check
+  (:data:`AR5_TO_AR7_CHECKS`) have no production implementation, so production
+  is always denied today (AR6a's manifest signature is verified in both modes);
 - ``simulation_only``: nothing failed and every unavailable check is in
   :data:`WAIVABLE_IN_SIMULATION`, each listed in ``waived``. It permits
   execution against a test adapter only (a stub GraphQL endpoint, a local bare
@@ -73,8 +74,9 @@ CheckName = Literal[
     "ar6_release_manifest_signature",
     "ar7_repository_settings",
 ]
-#: The checks AR5-AR7 make. ``ar5_control_anchor`` is implemented for simulation
-#: (AR5b) and is no longer waivable; in production every one stays unavailable.
+#: The checks AR5-AR7 make. The AR5 anchors are implemented for simulation and
+#: are no longer waivable; in production they stay unavailable until AR7. The
+#: AR6a manifest signature is verified in both modes and never waived.
 AR5_TO_AR7_CHECKS: Final[tuple[CheckName, ...]] = (
     "ar5_control_anchor",
     "ar5_ledger_anchor",
@@ -85,7 +87,12 @@ AR5_TO_AR7_CHECKS: Final[tuple[CheckName, ...]] = (
 #: Checks a simulation may waive, each listed; anything else unavailable denies.
 WAIVABLE_IN_SIMULATION: Final[frozenset[str]] = frozenset(
     {*AR5_TO_AR7_CHECKS, "ar1_gate_verdict", "fc7b_pending_blockers"}
-    - {"ar5_control_anchor", "ar5_ledger_anchor", "ar5_quarantine_anchor"}
+    - {
+        "ar5_control_anchor",
+        "ar5_ledger_anchor",
+        "ar5_quarantine_anchor",
+        "ar6_release_manifest_signature",
+    }
 )
 CheckStatus = Literal["passed", "failed", "unavailable"]
 Mode = Literal["production", "simulation"]
@@ -159,6 +166,8 @@ class AuthorizationEvidence(Frozen):
     control_head_sha256: Digest | None
     #: AR5b: the stop latch's newest transition when authorized; ``None`` for no transition.
     stop_latch_head_sha256: Digest | None = None
+    #: AR6a: the detached manifest signature the evidence was issued on; ``None`` for none.
+    release_manifest_signature_sha256: Digest | None = None
     quarantine_sha256: Digest | None
     limits_sha256: Digest | None
     budget_state: str

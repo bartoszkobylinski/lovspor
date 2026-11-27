@@ -30,7 +30,8 @@ from lovspor.forarbeider.policy_authorization_models import PolicyApproval
 from lovspor.forarbeider.policy_trust import CONTROL_NAMESPACE, RELEASE_NAMESPACE
 from lovspor.forarbeider.publication_execute import Simulation, execute
 from lovspor.forarbeider.publication_execution_models import AppIdentity
-from lovspor.forarbeider.publication_integrity import integrity_checks
+from lovspor.forarbeider.publication_integrity import integrity_checks, manifest_signature_check
+from lovspor.forarbeider.publication_manifest_signature import held_signature
 from lovspor.forarbeider.publication_path_a import body, headline
 from lovspor.forarbeider.publication_recovery_models import integrity_of
 from lovspor.forarbeider.publication_remote import RemoteCommit
@@ -430,9 +431,18 @@ def _failed(rig: Rig, commit: RemoteCommit) -> dict[str, tuple[str, ...]]:
 
 
 def test_the_exact_proposal_passes_every_integrity_check(rig_a: Rig) -> None:
+    commit = _remote_commit(rig_a)
+    held = held_signature(rig_a.clone, rig_a.transaction.content.release_manifest_sha256)
+    signature = manifest_signature_check(commit, rig_a.inputs, (rig_a.root, NOW), held)
+    checks = integrity_checks(commit, rig_a.inputs, signature)
+
+    assert integrity_of(checks) == ("integrity_verified", ())
+
+
+def test_an_unchecked_manifest_signature_is_never_integrity_verified(rig_a: Rig) -> None:
     checks = integrity_checks(_remote_commit(rig_a), rig_a.inputs)
 
-    assert integrity_of(checks) == ("integrity_verified", ("ar6_release_manifest_signature",))
+    assert integrity_of(checks) == ("integrity_failed", ())
 
 
 def test_integrity_fails_each_check_for_its_own_fault(rig_a: Rig) -> None:

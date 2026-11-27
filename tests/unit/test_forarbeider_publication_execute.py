@@ -129,7 +129,12 @@ def test_a_simulated_authorization_passes_every_check_it_can_make(rig_a: Rig) ->
     assert {c.name for c in evidence.checks if c.status == "failed"} == set()
     unavailable = {c.name for c in evidence.checks if c.status == "unavailable"}
     assert unavailable <= WAIVABLE_IN_SIMULATION
-    anchored = {"ar5_control_anchor", "ar5_ledger_anchor", "ar5_quarantine_anchor"}
+    anchored = {
+        "ar5_control_anchor",
+        "ar5_ledger_anchor",
+        "ar5_quarantine_anchor",
+        "ar6_release_manifest_signature",
+    }
     assert set(AR5_TO_AR7_CHECKS) - anchored <= unavailable
     assert not anchored & unavailable  # AR5b, AR5c, AR5 quarantine: verified against the witness
     assert evidence.waived == tuple(sorted(unavailable))
@@ -158,7 +163,8 @@ def test_production_is_denied_whatever_else_passes(rig_a: Rig) -> None:
     assert outcome.status == "denied"
     evidence = outcome.evidence
     assert evidence is not None and evidence.decision == "denied"
-    assert set(AR5_TO_AR7_CHECKS) <= set(evidence.denied_by)
+    production_pending = set(AR5_TO_AR7_CHECKS) - {"ar6_release_manifest_signature"}
+    assert production_pending <= set(evidence.denied_by)
     assert states(rig_a) == ["denied"]
 
 
