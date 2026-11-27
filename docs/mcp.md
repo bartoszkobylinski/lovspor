@@ -418,7 +418,7 @@ names its own date. With `recorded_at` set (below), `temporal_notice` instead re
 historical corpus state, and `recorded_at` is never used as an evaluation date
 (ADR-0011 point 7).
 
-The `cross_references` field (Sprint 9 PR-B3.5) lists every `§ N-M` reference detected in the body, deduplicated by target, with each entry already validated against the manifest. `target_slug` defaults to the current act when no other slug appears within ~80 chars of the match (a same-act ref); a different slug means the resolver picked it up as a cross-act ref. `valid` is true only when the target section actually exists in the target act, and `reason` carries a short explanation when invalid.
+The `cross_references` field (Sprint 9 PR-B3.5) lists every `§ N-M` reference detected in the body, deduplicated by target, with each entry already validated against the manifest. When the `§` is the text of a link to an act (`[§ 5-2](lov/1969-06-13-26/§5-2)`), `target_slug` is the act the link names (#1034); `valid` is `null` when that act is not current in the corpus (then `target_slug` is `null` too) or when the link's section differs from the one parsed. Otherwise `target_slug` defaults to the current act when no other slug appears within ~80 chars of the match (a same-act ref); a different slug means the resolver picked it up as a cross-act ref. `valid` is true only when the target section actually exists in the target act, and `reason` carries a short explanation when invalid.
 
 Use this list to decide whether a referenced section is safe to quote without a follow-up `validate_citation` call. The field is an empty list when the body has no `§` patterns.
 
