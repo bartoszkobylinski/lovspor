@@ -1439,7 +1439,69 @@ Remaining gaps, classified:
   - The tag store can withhold. Absence reads as `unattested`, and append-only behaviour on GitHub rests on rulesets AR7 must verify.
   - The policy record is not published, so the reader cannot verify the owner's policy signature (AR8).
   - The reader walks at most 1024 commits back from `main`.
-  - There is no production transport, signer or GitHub tag API client, and the global auditor (AR8) is not here.
+  - There is no production transport, signer or GitHub tag API client, and the global auditor (AR8) is not here (AR6c below adds a bounded, read-only diagnostic slice of it).
+
+**AR6c status: independent publication history auditor (bounded, unanchored).** A read-only, deterministic audit of a window of remote `main`, judged from the remote and the trust root alone. It is a diagnostic slice of the AR8 auditor, not AR8 itself. Simulation only; production stays denied; no flag is enabled. It has no deployment, no schedule and no credential.
+
+- **Trust contract** (`publication_audit.AuditRequest`, recorded in the report's `scope` and `boundary`):
+  - the repository, branch and path come from the expected settings, and the trust root is named by its SHA-256;
+  - the audit time is the time keys are judged at (#1040 stays open);
+  - the traversal limit defaults to 1024 commits;
+  - the **boundary** is a commit the caller supplies, optionally with the canonical bytes of a prior report that ended there.
+- **The boundary is never trusted** (`boundary.trusted: false`). The audit proves only that the boundary is an ancestor of the observed head.
+  - A prior report must be readable and canonical, have the same scope, carry the verdict `verified_window`, end at this boundary and be made no later than this audit.
+  - A prior report is unsigned, so it is evidence of nothing beyond that consistency.
+  - Every report is `anchoring: unanchored`. Until AR7 supplies an independent pinned checkpoint, no report claims full-history coverage or rollback resistance.
+- **Walk.**
+  - `main` is read once before the walk and once after it.
+  - The walk goes from the observed head, by first parent, until it reaches the boundary.
+  - It reuses the AR6b verifiers for every commit: `derive_facts` for the commit, its manifest and the manifest's bot signature, and `read_attestation` for the tag. There is no second signature or manifest check.
+  - It trusts no receipt, workspace, clone or runner classification.
+- **Per-commit classification:**
+  - a merge, or a root, ends the walk;
+  - a commit with no release manifest and no manifest signature is `foreign`;
+  - a commit with either is a release. It is `release_invalid` when any fact fails: signature class, parent and base, file set, message, manifest or manifest signature.
+- **Attestation of a valid release:**
+  - `attested`;
+  - `missing` (no tag; never attested);
+  - `invalid`;
+  - `unverifiable` (the store could not be read).
+- **Duplicates across the window:**
+  - two releases of one manifest, one batch id or one plan sequence are duplicate facts;
+  - two attestations claiming one transaction conflict. The claim is compared, never verified.
+- **Verdicts.** Anomalies outrank gaps; the report lists both.
+  - `anomalies_found` means at least one of:
+    - a foreign commit;
+    - an invalid release;
+    - a missing or invalid attestation;
+    - a merge;
+    - duplicate or conflicting facts;
+    - a consistent prior report whose head the walk passed, all the way to the root (`history_rewritten_since_prior_audit`).
+  - `incomplete` means at least one of:
+    - an unavailable remote;
+    - an unreadable commit;
+    - an unverifiable attestation;
+    - the traversal limit;
+    - a head that moved during the audit;
+    - a boundary not reached;
+    - no boundary;
+    - an empty window;
+    - a prior report that does not hold.
+  - `verified_window` means **only** that every commit between the observed head and the boundary is a release whose facts and attestation verify, that the boundary was reached, and that the head did not move. It does not prove the history before the boundary, rollback resistance, authorization at publication, the quarantine source's identity (#1037), historical key validity (#1040), tag protection (#1046), the policy's owner signature, budget settlement, or anything about attestation tags of commits off `main`. Each report lists these under `not_verified`.
+- **Report** (`publication-history-audit/1`, canonical JSON with no time of its own beyond the audit time). It holds:
+  - the scope and the trust-root SHA-256;
+  - the boundary and its source;
+  - the observed and final heads;
+  - every examined commit (newest first) with its classification, attestation state, manifest digest, plan, batch, reasons and the claimed transaction, labelled as a claim;
+  - the counts, the anomalies, the gaps and the verdict.
+
+  It never holds document bodies or source content. The same remote, inputs and audit time give the same bytes, so a repeated or restarted audit gives an identical report.
+- **Read-only by construction.** `AuditSource` holds only three read callables: the head, a commit and an attestation tag. The auditor cannot publish, create or move a tag, write a receipt, set the latch or settle a budget. The tests check that both remotes and the workspace are unchanged byte for byte.
+- **Limitations.**
+  - It does not enumerate attestation tags of commits that are not on `main`.
+  - It does not check that batch sequences are ordered across plans.
+  - Path A's simulated endpoint cannot represent a merge commit, so the merge case is tested on path B only. On path A, a boundary off `main` ends as an unreadable commit, not a root.
+  - The AR7 pin, the #1037 source binding, the #1040 key-validity redesign, the #1046 tag rulesets, ledger v2, ADR-0028 and `sync.yml` are untouched.
 
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 

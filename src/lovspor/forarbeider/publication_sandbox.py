@@ -54,6 +54,10 @@ class SimulatedLostResponseError(Exception):
     """The simulated connection dropped after the mutation was applied."""
 
 
+class SimulatedUnavailableError(ConnectionError):
+    """AR6c: the simulated endpoint does not answer reads at all."""
+
+
 class SimulatedCrash(BaseException):
     """The simulated process died after the mutation was applied."""
 
@@ -119,6 +123,12 @@ class SimulatedGitHub:
     objects: dict[str, SimulatedObject] = field(default_factory=dict)
     ref_calls: list[dict[str, Any]] = field(default_factory=list)
     ref_fault: Literal["lost", "crash"] | None = None
+    #: AR6c: every read raises, as an endpoint that is down would.
+    unavailable: bool = False
+
+    def _answering(self) -> None:
+        if self.unavailable:
+            raise SimulatedUnavailableError
 
     def _apply(
         self, changes: Mapping[str, bytes], message: tuple[str, str], signer: SimulatedSigner
@@ -148,18 +158,22 @@ class SimulatedGitHub:
         return self._apply(changes, message, signer)
 
     def commit(self, oid: str) -> SimulatedCommit | None:
+        self._answering()
         return self.commits.get(oid)
 
     def head(self, repository: str, branch: str) -> str | None:
+        self._answering()
         if (repository, branch) != (self.repository, "main"):
             return None
         return self.reported_head or self.head_oid
 
     def ref(self, name: str) -> str | None:
         """The object a tag names, ``None`` when there is no such tag."""
+        self._answering()
         return self.refs.get(name)
 
     def object(self, oid: str) -> SimulatedObject | None:
+        self._answering()
         return self.objects.get(oid)
 
     def put_object(self, files: Mapping[str, bytes], message: str, signer: SimulatedSigner) -> str:
