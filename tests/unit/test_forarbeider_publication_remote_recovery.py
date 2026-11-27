@@ -411,6 +411,14 @@ def test_recovery_refuses_a_foreign_transport(rig_a: Rig) -> None:
 # --- integrity, check by check -----------------------------------------------------------------
 
 
+def _published(rig: Rig) -> dict[str, bytes]:
+    """The proposal and (AR6b) the manifest's signature published beside it."""
+    digest = rig.transaction.content.release_manifest_sha256
+    held = held_signature(rig.clone, digest)
+    assert held
+    return dict(proposal(rig)) | {f"releases/{digest}.sig": held}
+
+
 def _remote_commit(rig: Rig, **changes: Any) -> RemoteCommit:
     transaction = rig.transaction
     fields: dict[str, Any] = {
@@ -418,7 +426,7 @@ def _remote_commit(rig: Rig, **changes: Any) -> RemoteCommit:
         "parents": (rig.base,),
         "headline": headline(transaction),
         "body": body(transaction),
-        "files": dict(proposal(rig)),
+        "files": _published(rig),
         "signature_reasons": (),
         "event_at": NOW,
     }
@@ -432,9 +440,8 @@ def _failed(rig: Rig, commit: RemoteCommit) -> dict[str, tuple[str, ...]]:
 
 def test_the_exact_proposal_passes_every_integrity_check(rig_a: Rig) -> None:
     commit = _remote_commit(rig_a)
-    held = held_signature(rig_a.clone, rig_a.transaction.content.release_manifest_sha256)
-    signature = manifest_signature_check(commit, rig_a.inputs, (rig_a.root, NOW), held)
-    checks = integrity_checks(commit, rig_a.inputs, signature)
+    signature = manifest_signature_check(commit, rig_a.inputs, (rig_a.root, NOW))
+    checks = integrity_checks(commit, rig_a.inputs, signature.check)
 
     assert integrity_of(checks) == ("integrity_verified", ())
 
@@ -446,7 +453,7 @@ def test_an_unchecked_manifest_signature_is_never_integrity_verified(rig_a: Rig)
 
 
 def test_integrity_fails_each_check_for_its_own_fault(rig_a: Rig) -> None:
-    files = proposal(rig_a)
+    files = _published(rig_a)
     manifest = rig_a.transaction.content.release_manifest_path
     document = next(p for p in files if p.startswith("documents/"))
 
@@ -571,7 +578,8 @@ def _git_env(rig: Rig) -> dict[str, str]:
 
 def _push_signed(rig: Rig, signer: KeySigner, extra: dict[str, bytes] | None = None) -> str:
     """Our transaction's commit, signed by ``signer``, optionally with extra files, pushed."""
-    commit = publication_path_b.build_commit(rig.clone, rig.transaction, signer, NOW)
+    held = held_signature(rig.clone, rig.transaction.content.release_manifest_sha256) or b""
+    commit = publication_path_b.build_commit(rig.clone, rig.transaction, (signer, NOW), held)
     if extra:
         for path, data in extra.items():
             (rig.clone / path).write_bytes(data)

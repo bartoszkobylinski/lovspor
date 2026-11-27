@@ -25,6 +25,14 @@ four kinds of file, by grammar (:func:`publication_path`): a document
 batch, named by the digest of its own bytes. A preparation that would touch
 any other path is refused.
 
+**The manifest's signature** (AR6b) is published beside it as
+``releases/<sha256>.sig`` (:data:`RELEASE_SIGNATURE_FILE`), the exact AR6a
+SSHSIG over the manifest's bytes. It is never a proposed file: a transaction
+does not list it, so neither its digest nor the manifest's depends on it (the
+signature is made after preparation, over the manifest the transaction names).
+The commit publishes exactly the transaction's files and this one companion;
+a base tree may hold the companions of earlier batches.
+
 **Nothing here is an authorization.** ``authorized`` and ``published`` are
 ``False`` by type. What a preparation cannot check, because AR4b to AR7 do not
 exist yet, is listed in ``unavailable_checks`` and never reported as passed;
@@ -51,6 +59,7 @@ INDEX_FILE: Final = "INDEX.md"
 CATALOGUE_FILE: Final = "catalogue.json"
 DOCUMENT_FILE: Final = re.compile(r"documents/regjeringen-[1-9]\d{0,11}\.md")
 RELEASE_FILE: Final = re.compile(r"releases/[0-9a-f]{64}\.json")
+RELEASE_SIGNATURE_FILE: Final = re.compile(r"releases/[0-9a-f]{64}\.sig")
 #: Checks a preparation cannot make, and the slice that will; never reported as passed.
 UNAVAILABLE_CHECKS: Final = (
     "ar4b_publication_authorization_not_implemented",
@@ -96,6 +105,11 @@ def role_of(path: str) -> FileRole | None:
     if RELEASE_FILE.fullmatch(path):
         return "release_manifest"
     return None
+
+
+def release_signature_path(manifest_sha256: str) -> str:
+    """The published companion holding the bot's signature on the manifest with this digest."""
+    return f"releases/{manifest_sha256}.sig"
 
 
 def publication_path(path: str) -> bool:

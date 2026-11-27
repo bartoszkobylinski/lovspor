@@ -41,6 +41,7 @@ from lovspor.forarbeider import publication_clone
 from lovspor.forarbeider.corpus_leaves import directory, read_leaf, write_leaf
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.publication_models import (
+    RELEASE_SIGNATURE_FILE,
     PreparationJournal,
     PreparationState,
     PublicationTransaction,
@@ -344,7 +345,8 @@ def base_files(clone: Path, journal: PreparationJournal | None) -> dict[str, byt
 
     Raises:
         ForarbeiderRefusedError: ``corpus_tree_mismatch: base_tree`` for anything
-            in ``documents/`` or ``releases/`` that is not a publication file.
+            in ``documents/`` or ``releases/`` that is not a publication file
+            or an earlier batch's published manifest signature (AR6b).
     """
     changed = {} if journal is None else {i.path: i.previous_sha256 for i in journal.operations}
     found: dict[str, bytes] = {}
@@ -356,6 +358,8 @@ def base_files(clone: Path, journal: PreparationJournal | None) -> dict[str, byt
             continue
         if not os.path.lexists(clone / path):
             continue
+        if RELEASE_SIGNATURE_FILE.fullmatch(path) and path not in changed:
+            continue  # AR6b: an earlier batch's published manifest signature, never proposed
         if not publication_path(path):
             raise _mismatch("base_tree")
         found[path] = read_file(clone, path)

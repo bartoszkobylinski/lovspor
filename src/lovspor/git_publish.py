@@ -15,6 +15,11 @@ path B needs, as narrow as :mod:`lovspor.git_prepare`:
 - ``git add`` takes one publication path at a time, by the AR4a tree grammar,
   into a **separate index file** inside ``.git``, so the clone's own index,
   and with it the AR4a read-back, is never touched;
+- AR6b: the manifest's signature enters that index only as
+  ``releases/<sha256>.sig`` by ``update-index --cacheinfo`` of a blob written
+  from stdin; a publication attestation is a root commit of two blobs
+  (``mktree``) pushed, create-only and never forced, to its own tag
+  ``refs/tags/forarbeider-attestation-<commit>``, whose name is checked here;
 - ``git init`` makes only a bare repository at such a path, with no
   template, so no hook or other file is copied into it;
 - hooks, fsmonitor, replace objects and grafts are off; the environment is
@@ -41,6 +46,10 @@ _TREE_FILE = re.compile(
     r"INDEX\.md|catalogue\.json|documents/regjeringen-[1-9]\d{0,11}\.md|releases/[0-9a-f]{64}\.json"
 )
 _REFSPEC = re.compile(r"[0-9a-f]{40}:refs/heads/main")
+#: AR6b: one create-only tag per published commit holds its publication attestation.
+ATTESTATION_REF = re.compile(r"refs/tags/forarbeider-attestation-[0-9a-f]{40}")
+_ATTESTATION_REFSPEC = re.compile(r"[0-9a-f]{40}:refs/tags/forarbeider-attestation-[0-9a-f]{40}")
+_CACHEINFO = re.compile(r"100644,[0-9a-f]{40},releases/[0-9a-f]{64}\.sig")
 
 
 def _commit(part: str) -> bool:
@@ -64,11 +73,26 @@ def _refspec(part: str) -> bool:
     return _REFSPEC.fullmatch(part) is not None
 
 
+def _attestation_ref(part: str) -> bool:
+    return ATTESTATION_REF.fullmatch(part) is not None
+
+
+def _attestation_refspec(part: str) -> bool:
+    return _ATTESTATION_REFSPEC.fullmatch(part) is not None
+
+
+def _cacheinfo(part: str) -> bool:
+    return _CACHEINFO.fullmatch(part) is not None
+
+
 Part = str | Callable[[str], bool]
 COMMANDS: Final[tuple[tuple[Part, ...], ...]] = (
     ("init", "--bare", "--quiet", "--template=", "--initial-branch=main", _local_bare),
     ("read-tree", _commit),
     ("add", "--", _tree_file),
+    ("update-index", "--add", "--cacheinfo", _cacheinfo),
+    ("hash-object", "-t", "blob", "-w", "--stdin"),
+    ("mktree", "-z"),
     ("write-tree",),
     ("hash-object", "-t", "commit", "-w", "--stdin"),
     ("cat-file", "commit", _commit),
@@ -77,6 +101,8 @@ COMMANDS: Final[tuple[tuple[Part, ...], ...]] = (
     ("ls-tree", "-r", "-z", _commit),
     ("ls-remote", _local_bare, "refs/heads/main"),
     ("push", "--porcelain", _local_bare, _refspec),
+    ("ls-remote", _local_bare, _attestation_ref),
+    ("push", "--porcelain", _local_bare, _attestation_refspec),
 )
 _PREFIX = (
     "--no-pager",

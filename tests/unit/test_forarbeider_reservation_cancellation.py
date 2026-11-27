@@ -803,7 +803,10 @@ def test_a_publication_from_outside_the_proof_after_a_cancellation_halts_unsettl
     github = environment.transport
     assert github is not None
     payload = publication_path_a.payload_of(
-        rig.transaction, publication_execute._files(rig.request()), rig.inputs.settings
+        rig.transaction,
+        publication_execute._files(rig.request()),
+        rig.inputs.settings,
+        publication_execute._manifest_signature(rig.request()),
     )
     assert publication_path_a.send(github, payload, rig.inputs.settings).status == "published"
 
@@ -823,7 +826,10 @@ def test_a_receipt_without_any_attempt_record_refuses_the_cancellation(
     github = environment.transport
     assert github is not None
     payload = publication_path_a.payload_of(
-        rig.transaction, publication_execute._files(rig.request()), rig.inputs.settings
+        rig.transaction,
+        publication_execute._files(rig.request()),
+        rig.inputs.settings,
+        publication_execute._manifest_signature(rig.request()),
     )
     assert publication_path_a.send(github, payload, rig.inputs.settings).status == "published"
     monkeypatch.setattr(publication_remote_recovery, "_record_published", crash)

@@ -275,7 +275,8 @@ def test_a_stable_history_reads_the_head_twice_and_still_recovers(
     outcome = recover(rig_a.request(), sim_a(github))
 
     assert outcome.classification == "published_authorized"
-    assert reads == [github.head_oid, github.head_oid]
+    # Two reads bound the history walk; AR6b's attestation reader finds the commit from a third.
+    assert reads == [github.head_oid, github.head_oid, github.head_oid]
     assert len(github.calls) == 1
 
 

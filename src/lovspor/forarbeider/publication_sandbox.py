@@ -11,6 +11,8 @@ identity and, for path B, on disk before every use.
   refused, since the type must be exactly this one). Any other transport, a
   real GitHub client included, is refused before anything is read from it or
   posted to it.
+- AR6b: the same endpoint holds the repository's tags (:meth:`SimulatedGitHub.create_ref`),
+  where publication attestations are published create-only.
 - :class:`DisposableRemote` is a bare repository that
   :func:`create_disposable_remote` made, fresh, as the only entry of a
   private, empty sandbox directory.
@@ -75,6 +77,20 @@ class SimulatedCommit:
     at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class SimulatedObject:
+    """AR6b: a root commit made through the Git Data API, as GitHub would report it."""
+
+    oid: str
+    message: str
+    files: tuple[tuple[str, bytes], ...]
+    app: AppIdentity | None
+    verified: bool
+
+
+_REF_EXISTS: dict[str, Any] = {"message": "Reference already exists", "status": "422"}
+
+
 @final
 @dataclass(slots=True)
 class SimulatedGitHub:
@@ -98,11 +114,16 @@ class SimulatedGitHub:
     reported_head: str | None = None
     now: datetime | None = None
     commits: dict[str, SimulatedCommit] = field(default_factory=dict)
+    #: AR6b: the repository's tags and the root commits they name.
+    refs: dict[str, str] = field(default_factory=dict)
+    objects: dict[str, SimulatedObject] = field(default_factory=dict)
+    ref_calls: list[dict[str, Any]] = field(default_factory=list)
+    ref_fault: Literal["lost", "crash"] | None = None
 
     def _apply(
         self, changes: Mapping[str, bytes], message: tuple[str, str], signer: SimulatedSigner
     ) -> str:
-        oid = format(len(self.commits) + 1, "040x")
+        oid = format(len(self.commits) + len(self.objects) + 1, "040x")
         headline, body = message
         app, verified = signer
         made = SimulatedCommit(
@@ -133,6 +154,37 @@ class SimulatedGitHub:
         if (repository, branch) != (self.repository, "main"):
             return None
         return self.reported_head or self.head_oid
+
+    def ref(self, name: str) -> str | None:
+        """The object a tag names, ``None`` when there is no such tag."""
+        return self.refs.get(name)
+
+    def object(self, oid: str) -> SimulatedObject | None:
+        return self.objects.get(oid)
+
+    def put_object(self, files: Mapping[str, bytes], message: str, signer: SimulatedSigner) -> str:
+        """Someone makes a root commit of ``files`` (``signer`` as for :meth:`advance`)."""
+        oid = format(len(self.commits) + len(self.objects) + 1, "040x")
+        app, verified = signer
+        made = SimulatedObject(oid, message, tuple(sorted(files.items())), app, verified)
+        self.objects[oid] = made
+        return oid
+
+    def create_ref(self, payload: dict[str, Any]) -> Any:
+        """AR6b: blobs, a root tree, a commit signed as the App and a new tag, as the Git Data
+        API would; an existing tag is never moved (``Reference already exists``)."""
+        self.ref_calls.append(payload)
+        name = payload["ref"]
+        if name in self.refs:
+            return _REF_EXISTS
+        files = {path: base64.b64decode(data) for path, data in payload["files"].items()}
+        oid = self.put_object(files, payload["message"], (self.identity, True))
+        self.refs[name] = oid
+        if self.ref_fault == "lost":
+            raise SimulatedLostResponseError
+        if self.ref_fault == "crash":
+            raise SimulatedCrash
+        return {"ref": name, "object": {"sha": oid}}
 
     def post(self, payload: dict[str, Any]) -> Any:
         self.calls.append(payload)

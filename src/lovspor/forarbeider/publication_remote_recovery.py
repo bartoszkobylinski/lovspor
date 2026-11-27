@@ -53,6 +53,13 @@ from lovspor.forarbeider import (
     publication_receipts,
 )
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
+from lovspor.forarbeider.publication_attestation import (
+    Expected,
+    PublicationProof,
+    attestation_of,
+    public_source,
+    verify_publication,
+)
 from lovspor.forarbeider.publication_authorize import batch_usage
 from lovspor.forarbeider.publication_execute import (
     Environment,
@@ -63,6 +70,7 @@ from lovspor.forarbeider.publication_execute import (
 from lovspor.forarbeider.publication_execution_models import AttemptRecord, AttemptState
 from lovspor.forarbeider.publication_integrity import (
     AUTHORIZATION_UNAVAILABLE,
+    ManifestSignatureFinding,
     Verdict,
     authorization,
     integrity_checks,
@@ -70,10 +78,8 @@ from lovspor.forarbeider.publication_integrity import (
     ours,
 )
 from lovspor.forarbeider.publication_ledger import Settlement
-from lovspor.forarbeider.publication_manifest_signature import held_signature
 from lovspor.forarbeider.publication_recovery_models import (
     Classification,
-    IntegrityCheck,
     RecoveryReceipt,
     classification_of,
     integrity_of,
@@ -95,6 +101,9 @@ OutcomeClass = (
 _DERIVED_ONLY = {"sequence", "previous_sha256"}
 
 
+AttestationState = Literal["attested", "missing", "invalid", "not_attestable"]
+
+
 class RecoveryOutcome(NamedTuple):
     classification: OutcomeClass
     receipt: RecoveryReceipt | None
@@ -102,6 +111,9 @@ class RecoveryOutcome(NamedTuple):
     reasons: tuple[str, ...]
     #: AR5c: the durable settlement of a verified publication, when a ledger is given.
     settlement: Settlement | None = None
+    #: AR6b: the published commit's attestation, read from the remote; ``None`` when
+    #: nothing verified was published.
+    attestation: AttestationState | None = None
 
 
 def _not_eligible(detail: str) -> ForarbeiderRefusedError:
@@ -165,47 +177,59 @@ def _authorization_fields(verdict: Verdict) -> dict[str, Any]:
     }
 
 
-def _held(request: ExecutionRequest) -> bytes | None:
-    """This manifest's own signature record; an unsafe one is no signature (fails)."""
-    digest = request.inputs.transaction.content.release_manifest_sha256
-    try:
-        return held_signature(request.clone, digest)
-    except ForarbeiderRefusedError:
-        return b""
-
-
 def _signature(
     request: ExecutionRequest, commit: RemoteCommit, verdict: Verdict, at: datetime
-) -> IntegrityCheck:
-    """AR6a, at the attempt's time when there is one, else the remote's, else recovery's."""
+) -> ManifestSignatureFinding:
+    """AR6b: the published signature, at the attempt's time when there is one, else the
+    remote's, else recovery's. Nothing is read from the runner's clone."""
     attempt = verdict.attempt
     when = attempt.recorded_at if attempt else (commit.event_at or at)
-    return manifest_signature_check(commit, request.inputs, (request.root, when), _held(request))
+    return manifest_signature_check(commit, request.inputs, (request.root, when))
+
+
+def _signer_fields(finding: ManifestSignatureFinding) -> dict[str, Any]:
+    found = finding.found
+    verified = found is not None and found.verified
+    return {
+        "manifest_signature_sha256": found.signature_sha256 if verified and found else None,
+        "bot_fingerprint": found.fingerprint if verified and found else None,
+    }
 
 
 def _draft(
     request: ExecutionRequest, commit: RemoteCommit, records: list[AttemptRecord], at: datetime
 ) -> dict[str, Any]:
     """Every receipt field but its place in the chain, from verified facts only."""
-    content = request.inputs.transaction.content
     verdict = _verdict(request, commit, records)
-    checks = integrity_checks(commit, request.inputs, _signature(request, commit, verdict, at))
+    finding = _signature(request, commit, verdict, at)
+    checks = integrity_checks(commit, request.inputs, finding.check)
     integrity, waived = integrity_of(checks)
     mine = ours(commit, request.inputs)
-    return _authorization_fields(verdict) | {
+    return (
+        _authorization_fields(verdict)
+        | _signer_fields(finding)
+        | _commit_fields(request, commit)
+        | {
+            "integrity": integrity,
+            "integrity_checks": checks,
+            "waived": waived,
+            "ours": mine,
+            "classification": classification_of(integrity, verdict.authorization, mine),
+            "recovered_from_remote": _recovered(records, commit.oid),
+        }
+    )
+
+
+def _commit_fields(request: ExecutionRequest, commit: RemoteCommit) -> dict[str, Any]:
+    content = request.inputs.transaction.content
+    return {
         "transaction_id": request.inputs.transaction.transaction_id,
         "release_manifest_sha256": content.release_manifest_sha256,
         "path": content.publication.path,
         "base_commit": content.publication.base_commit,
         "commit": commit.oid,
         "parent": commit.parents[0] if len(commit.parents) == 1 else None,
-        "integrity": integrity,
-        "integrity_checks": checks,
-        "waived": waived,
         "remote_event_at": commit.event_at,
-        "ours": mine,
-        "classification": classification_of(integrity, verdict.authorization, mine),
-        "recovered_from_remote": _recovered(records, commit.oid),
     }
 
 
@@ -416,4 +440,48 @@ def _recover(request: ExecutionRequest, environment: Simulation, reader: Reader)
         item if isinstance(item, RecoveryReceipt) else _written(request, item)
         for item in reconciled
     ]
-    return _settle(request, receipts, fresh, at)
+    return _attested(request, environment, _settle(request, receipts, fresh, at), at)
+
+
+def _attested(
+    request: ExecutionRequest, environment: Simulation, outcome: RecoveryOutcome, at: datetime
+) -> RecoveryOutcome:
+    return outcome._replace(attestation=_attestation(request, environment, outcome, at))
+
+
+def _attestation(
+    request: ExecutionRequest, environment: Simulation, outcome: RecoveryOutcome, at: datetime
+) -> AttestationState | None:
+    """AR6b: what the remote holds as the bot's attestation of the published commit.
+
+    Read only: recovery never writes an attestation and never republishes to
+    repair one. ``published_authorized`` is ``attested`` (the reader verifies
+    it, and it rests on exactly the receipt on record), ``missing`` (attestable:
+    :func:`~lovspor.forarbeider.publication_attestation.attest` may make it) or
+    ``invalid``; any other publication is ``not_attestable``, and an attestation
+    found for one is ``invalid``. ``invalid`` sets the stop latch.
+    """
+    receipt = outcome.receipt
+    if receipt is None or not receipt.published:
+        return None
+    expected = Expected(request.root, request.inputs.settings)
+    proof = verify_publication(public_source(environment, expected), expected, receipt.commit, at)
+    state = _state(request, receipt, proof)
+    if state == "invalid":
+        _halt(request, (f"attestation_invalid:{receipt.commit}",), at)
+    return state
+
+
+def _state(
+    request: ExecutionRequest, receipt: RecoveryReceipt, proof: PublicationProof
+) -> AttestationState:
+    authorized = receipt.classification == "published_authorized"
+    if proof.status == "unattested":
+        return "missing" if authorized else "not_attestable"
+    if proof.status != "attested" or proof.attestation is None or not authorized:
+        return "invalid"
+    held = {r.commit: raw for r, raw in publication_receipts.chain(request.workspace)}
+    raw = held.get(receipt.commit)
+    if raw is None or proof.attestation != attestation_of(receipt, raw, proof.attestation.remote):
+        return "invalid"
+    return "attested"

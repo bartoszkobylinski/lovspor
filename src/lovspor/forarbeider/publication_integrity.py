@@ -6,13 +6,13 @@ publication: one parent, the base; the signature class the path requires
 root lists, in the release namespace, at the commit's stated time); the
 transaction's message; exactly the proposed files with their SHA-256; and one
 release manifest, named by its digest, that binds this transaction's plan,
-batch, path and policy and lists every other changed file; and (AR6a) the
-manifest's own bot signature: the published manifest bytes verified against the
-detached signature the runner holds, with the same verifier as before the send
+batch, path and policy and lists every other changed file; and (AR6a, AR6b)
+the manifest's own bot signature: the published manifest bytes verified against
+the signature **published beside them** as ``releases/<manifest sha256>.sig``,
+with the same verifier as before the send
 (:mod:`~lovspor.forarbeider.publication_manifest_signature`), at the attempt's
-time. A signature that fails is ``failed``; none held is ``unavailable``
-(publishing it with the commit is AR6b) and is no longer waived, so neither is
-ever ``integrity_verified``.
+time. Nothing is read from the runner's clone. A signature that is missing or
+fails is ``failed``, never ``integrity_verified``.
 
 **Authorization** asks a different question: did the policy hold at the
 publication event? Its evidence is (i) the runner's ``prepared_to_send``
@@ -49,9 +49,14 @@ from lovspor.forarbeider.publication_authorize import AuthorizationInputs
 from lovspor.forarbeider.publication_execution_models import AttemptRecord
 from lovspor.forarbeider.publication_manifest_signature import (
     ManifestClaim,
+    ManifestSignature,
     verify_manifest_signature,
 )
-from lovspor.forarbeider.publication_models import RELEASE_FILE, ReleaseManifestFile
+from lovspor.forarbeider.publication_models import (
+    RELEASE_FILE,
+    ReleaseManifestFile,
+    release_signature_path,
+)
 from lovspor.forarbeider.publication_path_a import body, headline
 from lovspor.forarbeider.publication_recovery_models import (
     CLOCK_UNCERTAINTY_SECONDS,
@@ -107,9 +112,14 @@ def ours(commit: RemoteCommit, inputs: AuthorizationInputs) -> bool:
     return (commit.headline, commit.body) == (headline(transaction), body(transaction))
 
 
+def _companion(inputs: AuthorizationInputs) -> str:
+    return release_signature_path(inputs.transaction.content.release_manifest_sha256)
+
+
 def _files(commit: RemoteCommit, inputs: AuthorizationInputs) -> list[str]:
+    """Exactly the proposal and the manifest's signature (AR6b), whose bytes AR6 checks."""
     wanted = {item.path: item.sha256 for item in inputs.transaction.content.files}
-    if set(commit.files) != set(wanted):
+    if set(commit.files) != set(wanted) | {_companion(inputs)}:
         return ["files_not_the_proposal"]
     found = {path: data for path, data in commit.files.items() if data is not None}
     if any(sha256(found.get(p, b"")).hexdigest() != digest for p, digest in wanted.items()):
@@ -145,39 +155,49 @@ def _manifest(commit: RemoteCommit, inputs: AuthorizationInputs) -> list[str]:
     if policy is None or found.policy != policy:
         reasons.append("manifest_policy_not_the_plans")
     listed = {item.path for item in found.files} | {content.release_manifest_path}
-    if listed != set(commit.files):
+    if listed | {_companion(inputs)} != set(commit.files):
         reasons.append("changed_files_not_listed_in_manifest")
     return reasons
 
 
+class ManifestSignatureFinding(NamedTuple):
+    """AR6b: the integrity check, and the verifier's answer when there was a signature to verify."""
+
+    check: IntegrityCheck
+    found: ManifestSignature | None
+
+
 def manifest_signature_check(
-    commit: RemoteCommit,
-    inputs: AuthorizationInputs,
-    trust: tuple[TrustRoot, datetime],
-    held: bytes | None,
-) -> IntegrityCheck:
-    """AR6a: the published manifest's bytes carry the bot's signature the runner holds."""
+    commit: RemoteCommit, inputs: AuthorizationInputs, trust: tuple[TrustRoot, datetime]
+) -> ManifestSignatureFinding:
+    """AR6b: the published manifest's bytes carry the bot's signature published beside them.
+
+    Both are read from the commit itself, never from the runner's clone. A
+    commit with no signature companion, or an empty one, fails.
+    """
     name: Final = "ar6_release_manifest_signature"
     raw = commit.files.get(inputs.transaction.content.release_manifest_path)
     if raw is None:
-        return IntegrityCheck(name=name, status="failed", reasons=("manifest_not_published",))
-    if held is None:
-        return IntegrityCheck(
-            name=name, status="unavailable", reasons=("manifest_signature_not_held_ar6b_pending",)
+        failed = IntegrityCheck(name=name, status="failed", reasons=("manifest_not_published",))
+        return ManifestSignatureFinding(failed, None)
+    published = commit.files.get(_companion(inputs))
+    if not published:
+        reasons = ("manifest_signature_not_published",)
+        return ManifestSignatureFinding(
+            IntegrityCheck(name=name, status="failed", reasons=reasons), None
         )
-    plan = sealed_plan(inputs)
-    settings = inputs.settings
-    claim = ManifestClaim(
-        inputs.transaction,
-        plan.basis.policy if plan is not None else None,
-        settings.repository,
-        settings.bot_principal,
-    )
     root, at = trust
     # A bot key revoked since fails, as the path B commit's ``signature_class`` does
-    # in practice (``ssh-keygen -r``); fail-closed, never integrity-verified.
-    found = verify_manifest_signature(claim, SignedBytes(raw, held), root, at)
-    return _check(name, list(found.reasons))
+    # in practice (``ssh-keygen -r``); fail-closed, never integrity-verified (#1040).
+    found = verify_manifest_signature(_claim(inputs), SignedBytes(raw, published), root, at)
+    return ManifestSignatureFinding(_check(name, list(found.reasons)), found)
+
+
+def _claim(inputs: AuthorizationInputs) -> ManifestClaim:
+    plan = sealed_plan(inputs)
+    settings = inputs.settings
+    policy = plan.basis.policy if plan is not None else None
+    return ManifestClaim(inputs.transaction, policy, settings.repository, settings.bot_principal)
 
 
 def integrity_checks(
