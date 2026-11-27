@@ -31,11 +31,20 @@ D. **Non-equivocation.** Two signed successors of one checkpoint can exist
    (two stores, one key), but the pin names one. The other store then holds a
    checkpoint the pin contradicts and is ``diverged``, for good.
 
-Because a writer could push a fast-forward commit holding an *older*, validly
-signed checkpoint, the pinned checkpoint's sequence must equal the ref's commit
-count minus one, the ref must hold no merge, and the pinned checkpoint must
-link to the one its parent commit pins. The commit count only grows, so a
-replay never fits.
+Because any writer of the authority can push fast-forward commits (an older,
+validly signed checkpoint replayed, an invalid commit, a fork under a valid
+last link), the tip, its depth and its last link prove nothing about the
+commits beneath. The verifier reads the ref's whole first-parent lineage: every
+commit has one parent at most, holds exactly the pin file and holds a
+witness-signed checkpoint of this log extending the one before it, from
+genesis (#1051). A commit that cannot be read is ``authority_unavailable``; an
+invalid one fails the log closed for good.
+
+**Selection is not validity.** The bootstrap comes from the caller. Two logs
+the owner approved for one repository and purpose each verify: a verdict says
+the offered log is owner-approved and pinned, never that it is *the* log.
+Authoritative selection needs the approved log id held outside the request
+and the store (AR7b); AR7a does not provide it (#1052).
 
 **Currentness is not consistency.** :func:`current` decides whether the
 store's head is the pinned checkpoint (``verified``). :func:`standing` judges a
@@ -323,27 +332,47 @@ class _Pin(NamedTuple):
     commit: str
 
 
-def _pin(bare: Path, log: _Log) -> _Pin | Status:
-    """The checkpoint the authority pins, judged; or why there is none to rely on.
+class _NoPin(NamedTuple):
+    status: Status
+    reason: str
+
+
+def _pin(bare: Path, log: _Log) -> _Pin | _NoPin:
+    """The checkpoint the authority pins, judged with its whole lineage; or why not.
+
+    Every commit from the root to the tip must have one parent at most, hold
+    exactly the pin file, and hold a checkpoint of this log, witness-signed,
+    that extends the one before it from genesis. The tip's last link, its depth
+    and the absence of merges prove nothing about the commits beneath them.
 
     Raises:
-        git_checkpoint.GitCheckpointError: the authority cannot be read.
+        git_checkpoint.GitCheckpointError: the authority, or any commit of its
+            history, cannot be read.
     """
     flags = git_checkpoint.settings(bare)
     if not (flags.deny_non_fast_forwards and flags.deny_deletes):
-        return "authority_not_monotonic"
+        return _NoPin("authority_not_monotonic", "authority_settings")
     tip = git_checkpoint.tip(bare, log.bootstrap.authority.ref)
     if tip is None:
-        return "pin_missing"
-    pinned = git_checkpoint.pinned(bare, tip)
-    found = _pinned_checkpoint(pinned, log)
-    if isinstance(found, str) or pinned.merges or found.sequence != pinned.commits - 1:
-        return "pin_invalid"
-    if pinned.parent is None:
-        return _Pin(found, tip) if found == genesis(log.log_id) else "pin_invalid"
-    before = _pinned_checkpoint(git_checkpoint.pinned(bare, pinned.parent), log)
-    linked = not isinstance(before, str) and _follows(before, found)
-    return _Pin(found, tip) if linked else "pin_invalid"
+        return _NoPin("pin_missing", "pin_ref_absent")
+    return _lineage(git_checkpoint.lineage(bare, tip), log)
+
+
+def _lineage(commits: tuple[git_checkpoint.Pinned, ...], log: _Log) -> _Pin | _NoPin:
+    """The tip's checkpoint when every commit, oldest first, extends the one before it."""
+    previous: Checkpoint | None = None
+    for commit in commits:
+        if len(commit.parents) > 1:
+            return _NoPin("pin_invalid", "pin_lineage_merge")
+        found = _pinned_checkpoint(commit, log)
+        if isinstance(found, str):
+            return _NoPin("pin_invalid", f"pin_lineage_{found}")
+        if not _follows(previous, found):
+            return _NoPin("pin_invalid", "pin_lineage_inconsistent")
+        previous = found
+    if previous is None:
+        return _NoPin("pin_invalid", "pin_lineage_empty")
+    return _Pin(previous, commits[-1].commit)
 
 
 def _pinned_checkpoint(pinned: git_checkpoint.Pinned, log: _Log) -> Checkpoint | str:
@@ -397,7 +426,9 @@ def _pinned_state(witnessing: Witnessing) -> tuple[_Log, _Pin] | CheckpointVerdi
         pinned = _pin(bare, log)
     except git_checkpoint.GitCheckpointError:
         return _verdict("authority_unavailable", log)
-    return _verdict(pinned, log) if isinstance(pinned, str) else (log, pinned)
+    if isinstance(pinned, _NoPin):
+        return _verdict(pinned.status, log)._replace(reasons=(pinned.reason,))
+    return log, pinned
 
 
 def current(witnessing: Witnessing) -> CheckpointVerdict:
@@ -424,6 +455,9 @@ def current(witnessing: Witnessing) -> CheckpointVerdict:
 
 def require_current(witnessing: Witnessing) -> Checkpoint:
     """The pinned checkpoint, only when the store's head is it; what a dependent relies on.
+
+    It never selects the log: any owner-approved bootstrap the caller offers
+    can pass (#1052).
 
     Raises:
         ForarbeiderRefusedError: ``release_not_eligible: checkpoint_<status>``

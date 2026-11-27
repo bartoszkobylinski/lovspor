@@ -19,6 +19,8 @@ the AR7a checkpoint authority needs, as narrow as :mod:`lovspor.git_publish`:
   ``receive.denyNonFastForwards`` and ``receive.denyDeletes`` (which Git
   applies to ``refs/heads/*`` only) refuse a forced rewind, a forced sibling
   and a deletion from any other client. :func:`settings` reads both;
+- reading never stops at the tip: :func:`lineage` reads every commit of the
+  ref down to its root, and a missing object raises;
 - hooks, fsmonitor, replace objects and grafts are off; the environment is
   built here, never inherited.
 
@@ -81,8 +83,6 @@ COMMANDS: Final[tuple[tuple[Part, ...], ...]] = (
     ("cat-file", "commit", _object),
     ("cat-file", "blob", _object),
     ("ls-tree", "-z", _object),
-    ("rev-list", "--count", _object),
-    ("rev-list", "--count", "--min-parents=2", _object),
     ("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", _local_bare, _ref),
     ("hash-object", "-t", "blob", "-w", "--stdin"),
     ("mktree", "-z"),
@@ -206,24 +206,22 @@ def tip(bare: Path, ref: str) -> str | None:
 
 
 class Pinned(NamedTuple):
-    """One commit of the authority's ref: its files, its parent and its depth."""
+    """One commit of the authority's ref: its parents and its files."""
 
     commit: str
-    parent: str | None
+    parents: tuple[str, ...]
     files: dict[str, bytes]
-    commits: int
-    merges: int
 
 
 def pinned(bare: Path, commit: str) -> Pinned:
-    """Everything a verifier judges about ``commit``, read from the authority.
+    """Everything a verifier judges about one ``commit``, read from the authority.
 
     Raises:
         GitCheckpointError: any object cannot be read.
     """
     raw = _out(bare, ("cat-file", "commit", commit))
     header = raw.split(b"\n\n", 1)[0].splitlines()
-    parents = [line[7:].decode() for line in header if line.startswith(b"parent ")]
+    parents = tuple(line[7:].decode() for line in header if line.startswith(b"parent "))
     files: dict[str, bytes] = {}
     for record in _out(bare, ("ls-tree", "-z", commit)).split(b"\0"):
         if record:
@@ -232,9 +230,23 @@ def pinned(bare: Path, commit: str) -> Pinned:
             if kind != "blob" or mode != "100644":
                 raise GitCheckpointError("authority tree holds no plain file")
             files[path.decode()] = _out(bare, ("cat-file", "blob", oid))
-    commits = int(_out(bare, ("rev-list", "--count", commit)))
-    merges = int(_out(bare, ("rev-list", "--count", "--min-parents=2", commit)))
-    return Pinned(commit, parents[0] if len(parents) == 1 else None, files, commits, merges)
+    return Pinned(commit, parents, files)
+
+
+def lineage(bare: Path, tip: str) -> tuple[Pinned, ...]:
+    """Every commit from the root to ``tip`` along first parents, oldest first.
+
+    Each commit is read whole, so a history with any object missing raises
+    rather than ending early. A commit with more than one parent is returned
+    as is: the caller refuses it.
+
+    Raises:
+        GitCheckpointError: any object cannot be read.
+    """
+    found = [pinned(bare, tip)]
+    while found[-1].parents:
+        found.append(pinned(bare, found[-1].parents[0]))
+    return tuple(reversed(found))
 
 
 # --- moving the pin ------------------------------------------------------------------------------

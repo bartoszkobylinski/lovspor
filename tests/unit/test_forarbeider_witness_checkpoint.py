@@ -313,7 +313,7 @@ def test_a_fast_forward_pin_that_is_not_the_next_checkpoint_is_invalid(
 
 def test_a_replayed_pair_of_older_linked_checkpoints_is_invalid(world: World) -> None:
     """Red 6b: genesis then checkpoint 1, replayed as two fast-forward commits, link to each
-    other; only the commit count shows that they are not the next checkpoint."""
+    other; only the whole lineage shows that they are not the next checkpoint."""
     chain = chain_of(world, 2)
     world.advance(1)
     world.advance(2)
