@@ -10,6 +10,12 @@ remote itself, as two separate verdicts:
   ``authorized``, ``unauthorized`` or ``authorization_unknown``. A valid commit
   never proves it was authorized, and missing evidence is never approval.
 
+Since AR6b (``publication-receipt/2``) a receipt also names the digest of the
+manifest signature **published with the commit** and the fingerprint of the
+bot key it verified for; a verified publication always names both. Version 1
+receipts were written only by simulations before AR6b and are refused on read
+(no release has happened, so nothing real migrates).
+
 The receipt is canonical and holds no time of its own making: every field
 follows from verified facts (the remote, the trust root, the signed records,
 the attempt records), so recovering twice writes nothing the second time.
@@ -24,7 +30,7 @@ from lovspor.forarbeider.publication_execution_models import CheckStatus
 from lovspor.forarbeider.publication_models import CommitId
 from lovspor.forarbeider.version_models import Digest, Frozen, NonBlank
 
-RECEIPT_VERSION: Final = "publication-receipt/1"
+RECEIPT_VERSION: Final = "publication-receipt/2"
 #: How far apart two clocks may be before an ordering is called uncertain.
 CLOCK_UNCERTAINTY_SECONDS: Final = 300
 
@@ -88,7 +94,7 @@ class RecoveryReceipt(Frozen):
 
     schema_version: Literal[1] = 1
     record_type: Literal["forarbeider_publication_receipt"] = "forarbeider_publication_receipt"
-    receipt_version: Literal["publication-receipt/1"] = RECEIPT_VERSION
+    receipt_version: Literal["publication-receipt/2"] = RECEIPT_VERSION
     mode: Literal["simulation"] = "simulation"
     sequence: int = Field(ge=1)
     previous_sha256: Digest | None
@@ -110,9 +116,17 @@ class RecoveryReceipt(Frozen):
     ours: bool
     classification: Classification
     recovered_from_remote: bool
+    #: AR6b: the digest of the manifest signature published with the commit, when one verified.
+    manifest_signature_sha256: Digest | None
+    #: AR6b: the fingerprint of the bot key that signature verified for.
+    bot_fingerprint: NonBlank | None
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
+        if (self.manifest_signature_sha256 is None) != (self.bot_fingerprint is None):
+            raise ValueError("a verified manifest signature names its digest and its key")
+        if self.published and self.bot_fingerprint is None:
+            raise ValueError("a verified publication names the bot key that signed its manifest")
         if (self.sequence == 1) != (self.previous_sha256 is None):
             raise ValueError("only the first receipt has no previous receipt")
         if integrity_of(self.integrity_checks) != (self.integrity, self.waived):

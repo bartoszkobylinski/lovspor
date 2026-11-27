@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.forarbeider import publication_attempts, publication_receipts
+from lovspor.forarbeider import publication_attempts
 from lovspor.forarbeider.policy_trust import (
     ANCHOR_NAMESPACE,
     BOT_NAMESPACES,
@@ -343,9 +343,13 @@ def test_a_published_commit_on_a_genuine_signature_is_integrity_verified(rig: Ri
 
 
 @pytest.mark.parametrize("change", ["removed", "foreign"])
-def test_a_published_commit_whose_manifest_signature_fails_is_never_integrity_valid(
-    rig: Rig, change: str
-) -> None:
+def test_after_publication_the_runners_record_is_no_evidence(rig: Rig, change: str) -> None:
+    """AR6b: recovery verifies the signature published with the commit, never the clone's record.
+
+    A published manifest signature that fails is covered on both paths in
+    ``test_forarbeider_publication_attestation`` (forged commits) and here by the
+    revoked key below.
+    """
     adapters = published(rig)
     if change == "removed":
         record(rig).unlink()
@@ -356,13 +360,9 @@ def test_a_published_commit_whose_manifest_signature_fails_is_never_integrity_va
 
     receipt = outcome.receipt
     assert receipt is not None
-    assert receipt.integrity == "integrity_failed"
-    assert receipt.classification == "halted_integrity_failed"
-    assert receipt.ours
-    assert outcome.classification != "not_published"
-    assert publication_attempts.latched(rig.workspace)
-    assert states(rig)[-1] == "published"
-    assert not any(r.published for r in publication_receipts.receipts(rig.workspace))
+    assert receipt.integrity == "integrity_verified"
+    assert outcome.classification == "published_authorized"
+    assert not publication_attempts.latched(rig.workspace)
 
 
 def test_a_bot_key_revoked_after_publication_never_verifies_the_manifest(rig: Rig) -> None:

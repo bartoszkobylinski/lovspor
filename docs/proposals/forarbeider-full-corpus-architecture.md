@@ -1384,11 +1384,62 @@ Remaining gaps, classified:
   - `ar6_release_manifest_signature` is a real check in both modes and is no longer waivable in simulation. On path A it verifies the proposed bytes only, never a commit GitHub has not made; on path B it runs besides, never instead of, the local commit's `bot_signature` check.
   - The evidence seals the signature's digest (`release_manifest_signature_sha256`). `_still_current` verifies the held signature again under the locks and requires it to be the evidence's (`authorization_stale:manifest_signature:<why>`).
   - Any failure denies before `prepared_to_send`, so nothing is recorded as sent and no remote mutation runs.
-- **Recovery.** `manifest_signature_check` verifies the *published* manifest bytes against the runner's record for that manifest digest, at the `prepared_to_send` time (else the remote event's, else recovery's clock). A bot key revoked since fails it, as the path B commit's `signature_class` already does in practice (`ssh-keygen` is given the revocation list, although its docstring says otherwise: #1040, owner decision); the commit is then a halted published anomaly, fail-closed. A signature that fails is `failed`. None held is `unavailable` (`manifest_signature_not_held_ar6b_pending`), and `WAIVABLE_INTEGRITY` is now empty, so neither is ever `integrity_verified`. Such a commit stays a published anomaly (`halted_integrity_failed`, receipted, latch set), never `not_published`; existing receipts are not rewritten.
+- **Recovery** (as AR6a shipped it; since AR6b the signature is read from the commit, below). `manifest_signature_check` verifies the *published* manifest bytes against the runner's record for that manifest digest, at the `prepared_to_send` time (else the remote event's, else recovery's clock). A bot key revoked since fails it, as the path B commit's `signature_class` already does in practice (`ssh-keygen` is given the revocation list, although its docstring says otherwise: #1040, owner decision); the commit is then a halted published anomaly, fail-closed. A signature that fails is `failed`. None held is `unavailable` (`manifest_signature_not_held_ar6b_pending`), and `WAIVABLE_INTEGRITY` is now empty, so neither is ever `integrity_verified`. Such a commit stays a published anomaly (`halted_integrity_failed`, receipted, latch set), never `not_published`; existing receipts are not rewritten.
 - **Remaining AR6 dependencies.**
-  - **AR6b:** publishing the manifest signature with the commit, the bot-signed publication attestation (`lovspor-forarbeider-publication`), and a receipt naming the bot key fingerprint, so a reader can verify the chain policy → manifest → commit → attestation without the runner. Until then post-publication verification by anyone but the runner is unavailable.
-  - **Later AR6 / AR8:** the reader, and the independent auditor that re-verifies every new `main` commit from the remote alone.
+  - **AR6b** (below): publishing the manifest signature with the commit, the bot-signed publication attestation (`lovspor-forarbeider-publication`), and a receipt naming the bot key fingerprint.
+  - **Later AR6 / AR8:** the independent auditor that re-verifies every new `main` commit from the remote alone.
   - Not here: #1037, the AR7 witness pin and settings verification, ledger v2.
+
+**AR6b status: published manifest signature and publication attestation.** A publication can be verified from the remote and the trust root alone, without the runner's clone or workspace. Simulation only; production stays denied; no flag is enabled. #1037 stays open; #1040 (historical key validity) stays a separate owner decision.
+
+- **Evidence graph.** Each arrow is a verification; nothing points back, so no digest depends on what it proves:
+  1. policy → manifest bytes: the manifest names the policy (id, version, digest). The owner's signature on the policy is not published, so the reader reports the reference as the manifest's statement (AR8 verifies it).
+  2. manifest bytes → manifest signature: the genuine AR6a SSHSIG (bot, `lovspor-forarbeider-release`) over exactly the manifest's bytes.
+  3. manifest + remote commit → verified receipt: parent = the manifest's base, the path's signature class, exactly the manifest's files plus the manifest and its signature (§9.3a 2a).
+  4. verified publication facts → publication attestation: the bot's SSHSIG (`lovspor-forarbeider-publication`) over the facts and the receipt, published after the commit exists.
+- **The manifest signature is published in the same commit** as `releases/<release_manifest_sha256>.sig`, beside the manifest. It is never a proposed file: the transaction does not list it, so the manifest's bytes, the manifest digest, the transaction id and `ReleaseManifestFile` v1 are unchanged (its `signature` field keeps its v1 constant; renaming it would be a manifest v2). The commit publishes exactly the transaction's files and this one companion.
+  - Path A adds it to the `createCommitOnBranch` additions; path B writes it as a blob into the separate index (`update-index --cacheinfo`), never from the working tree. B7 requires the companion's blob to be the recorded signature.
+  - The bytes sent are the recorded signature read once, after `_still_current`, and only if their digest is the one the evidence sealed (`authorization_stale:manifest_signature:not_the_evidences`). Nothing is substituted after authorization.
+  - A later batch's base tree may hold earlier companions; `base_files` accepts exactly that name and never proposes it.
+  - Recovery verifies the **published** signature against the **published** manifest bytes. The runner's `.git` record is only the signing record; nothing post-publication reads it. A commit without a companion, or with an empty, foreign, wrong-namespace, revoked or invalid one, fails integrity (`manifest_signature_not_published`, `manifest_signature:<why>`): a published anomaly, receipted, latched, never `not_published`.
+- **Receipts** are `publication-receipt/2`: they add `manifest_signature_sha256` and `bot_fingerprint`, the bot key the published signature verified for. A verified publication always names both. Version 1 was written only by simulations before AR6b and is refused on read; no release has happened, so nothing real migrates. The AR5a family schema follows.
+- **Attestation contract** (`publication-attestation/1`, `publication_attestation_models`). It is canonical, holds no time of its own, and keeps two kinds of statement apart:
+  - **remote facts**, which a reader re-derives and requires equal, field for field: repository, branch, path, signature class (and App id on A), commit, parent, the manifest's path and digest, the published signature's path, digest and bot fingerprint, every changed file with its SHA-256, and the policy, plan and batch the manifest names;
+  - **runner claims**, which no reader can check: transaction, attempt, attempt time, the remote event time as the runner read it, the authorization verdict and what it waived, and the receipt (version, sequence and the SHA-256 of its canonical bytes). They are reported as claims, never as verified.
+  - It lists what no reader can verify: the policy's owner signature, authorization at the publication event, the budget settlement, the AR7 settings and the tag protection.
+- **Where it lives.** It cannot be in the commit it names (the commit id is the digest of its tree). It lives in a create-only tag on the same repository, `refs/tags/forarbeider-attestation-<commit>`, pointing at a root commit whose tree is exactly `attestation.json` and `attestation.sig`.
+  - **Discovery** is by name: whoever has the commit id knows the one tag to read.
+  - **Binding:** the attestation must name the tag's commit, so one copied under another commit's tag, or from another repository, is refused.
+  - **Authentication:** the bytes are self-authenticating (bot key, publication namespace, checked against the trust root). The storage commit is checked as well: on path A, GitHub verified its signature for the pinned App; on path B, the bot key signed it in the publication namespace.
+  - **Create-only:** path A's simulated Git Data API never moves an existing ref (`Reference already exists`); path B pushes `<root>:refs/tags/forarbeider-attestation-<commit>`, never forced, to a remote refusing non-fast-forward updates and deletions. `lovspor.git_publish` gains exactly these shapes (`hash-object` of a blob, `mktree -z`, `update-index --cacheinfo` of a signature companion, `ls-remote` and `push` of an attestation tag).
+  - **On GitHub** a tag ruleset must restrict updates and deletions of `forarbeider-attestation-*`. AR7 verifies it; until then it is an expectation, not a fact [A, verify the Git Data API path and that App-created commits are signed].
+- **The independent reader** (`publication_attestation.verify_publication`) takes the remote, the trust root, the settings, a commit and the time keys are judged at. It finds the commit on `main` (within 1024 commits), re-derives every fact, verifies the published manifest signature, then reads the tag. Answers:
+  - `attested`: the facts verify, and the attestation verifies and states exactly them;
+  - `unattested` (`attestation_missing`): the facts verify, and there is no attestation, whether never written, withheld or removed. It is **never** attested;
+  - `invalid`: a fact fails, or the attestation fails (`attestation_not_this_commit`, `attestation_facts_mismatch`, `attestation_signature:<why>`, `attestation_incomplete`, `attestation_unreadable`, `attestation_not_canonical`, storage reasons, `attestation_store_unreadable`);
+  - `not_found`: not on `main`.
+- **Attesting** (`attest`) happens only for a receipt `published_authorized`, and only after the reader, run now on the remote, re-derives the very facts the receipt names (commit, parent, manifest, signature digest, bot fingerprint, path).
+  - A contradiction sets the latch (`attestation_conflict:receipt_contradicted:<field>`).
+  - The bytes are deterministic, so attesting is create-only, idempotent and crash-recoverable without a journal. A tag holding exactly these bytes is `already_attested`; one holding anything else is `attestation_conflict` and latches. A lost answer is read back; an outcome that stays unknown is `attestation_unknown`, safe to retry.
+  - It holds the workspace lock, never touches `main`, never republishes and never changes the budget ledger.
+- **Recovery** reports `attestation` read-only and never writes or repairs it:
+
+  | Remote state | Classification | `attestation` | Latch |
+  |---|---|---|---|
+  | nothing after the base | `not_published` | none | no |
+  | published, valid, authorized, no tag | `published_authorized` | `missing` (attestable) | no |
+  | published, valid, authorized, tag verifies on this receipt | `published_authorized` | `attested` | no |
+  | published, any invalid evidence (commit, manifest or its signature) | `halted_integrity_failed` | none | yes |
+  | published, valid, authorization unknown or unauthorized | `published_authorization_unknown` / `published_unauthorized` | `not_attestable` | yes |
+  | a tag that does not verify, rests on another receipt, or attests a non-authorized publication | as above | `invalid` | yes |
+
+  Receipts stay immutable, and the budget is settled exactly once, by recovery as before. A missing attestation never becomes integrity-valid independent proof.
+- **Limitations.**
+  - Keys are judged at the time the reader gives. A bot key revoked or expired since fails historical verification: that is #1040's decision, not decided here.
+  - The tag store can withhold. Absence reads as `unattested`, and append-only behaviour on GitHub rests on rulesets AR7 must verify.
+  - The policy record is not published, so the reader cannot verify the owner's policy signature (AR8).
+  - The reader walks at most 1024 commits back from `main`.
+  - There is no production transport, signer or GitHub tag API client, and the global auditor (AR8) is not here.
 
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 

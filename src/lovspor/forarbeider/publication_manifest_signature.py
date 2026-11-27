@@ -216,7 +216,8 @@ def held_signature(clone: Path, manifest_sha256: str) -> bytes | None:
 # --- the one verifier ---------------------------------------------------------------------------
 
 
-def _parsed(manifest: bytes) -> ReleaseManifestFile | str:
+def parsed_manifest(manifest: bytes) -> ReleaseManifestFile | str:
+    """The manifest in its canonical bytes, or why these bytes are not one."""
     try:
         found = ReleaseManifestFile.model_validate_json(manifest)
     except ValidationError:
@@ -263,7 +264,7 @@ def _content_reasons(manifest: bytes, claim: ManifestClaim) -> list[str]:
         reasons.append("manifest_digest_not_the_transactions")
     if _repository(manifest) not in (claim.repository, None):
         return [*reasons, "manifest_repository_mismatch"]
-    found = _parsed(manifest)
+    found = parsed_manifest(manifest)
     if isinstance(found, str):
         return [*reasons, found]
     return reasons + _binding_reasons(found, claim)

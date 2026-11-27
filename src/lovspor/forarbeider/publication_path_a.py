@@ -8,8 +8,9 @@ connection, and no production transport exists (AR4b-2 and AR7 come first).
 
 The mutation binds the repository, ``main``, ``expectedHeadOid`` = the base
 commit, a headline naming the release manifest digest, a body naming the
-transaction, plan and batch, and exactly the proposed files, each as the bytes
-the AR4a read-back proved, base64-encoded. There are no deletions.
+transaction, plan and batch, exactly the proposed files, each as the bytes
+the AR4a read-back proved, and (AR6b) the manifest's bot signature as
+``releases/<manifest sha256>.sig``, base64-encoded. There are no deletions.
 
 The answer is one of three, and never guessed:
 
@@ -26,7 +27,7 @@ from collections.abc import Mapping
 from typing import Any, Literal, NamedTuple, Protocol
 
 from lovspor.forarbeider.publication_execution_models import AppIdentity, PublicationSettings
-from lovspor.forarbeider.publication_models import PublicationTransaction
+from lovspor.forarbeider.publication_models import PublicationTransaction, release_signature_path
 
 MUTATION = (
     "mutation($input: CreateCommitOnBranchInput!) "
@@ -53,8 +54,13 @@ class Sent(NamedTuple):
     reasons: tuple[str, ...]
 
 
+def headline_for(manifest_sha256: str) -> str:
+    """The headline naming the release manifest with this digest."""
+    return f"forarbeider release {manifest_sha256}"
+
+
 def headline(transaction: PublicationTransaction) -> str:
-    return f"forarbeider release {transaction.content.release_manifest_sha256}"
+    return headline_for(transaction.content.release_manifest_sha256)
 
 
 def body(transaction: PublicationTransaction) -> str:
@@ -66,12 +72,21 @@ def body(transaction: PublicationTransaction) -> str:
 
 
 def payload_of(
-    transaction: PublicationTransaction, files: Mapping[str, bytes], settings: PublicationSettings
+    transaction: PublicationTransaction,
+    files: Mapping[str, bytes],
+    settings: PublicationSettings,
+    signature: bytes,
 ) -> dict[str, Any]:
-    """The exact mutation for ``transaction``: its files, its base, its repository and branch."""
+    """The exact mutation for ``transaction``: its files and the manifest's signature (AR6b).
+
+    ``signature`` is published as ``releases/<manifest sha256>.sig``; it is the
+    one the authorization verified and sealed, never a proposed file.
+    """
+    published = {item.path: files[item.path] for item in transaction.content.files}
+    published[release_signature_path(transaction.content.release_manifest_sha256)] = signature
     additions = [
-        {"path": item.path, "contents": base64.b64encode(files[item.path]).decode("ascii")}
-        for item in transaction.content.files
+        {"path": path, "contents": base64.b64encode(data).decode("ascii")}
+        for path, data in sorted(published.items())
     ]
     given = {
         "branch": {"repositoryNameWithOwner": settings.repository, "branchName": settings.branch},

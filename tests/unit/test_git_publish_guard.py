@@ -39,6 +39,35 @@ def test_a_push_target_is_an_absolute_local_git_path(target: str, fits: bool) ->
     assert allowed(("ls-remote", target, "refs/heads/main")) is fits
 
 
+_C = "a" * 40
+_TAG = f"refs/tags/forarbeider-attestation-{_C}"
+
+
+@pytest.mark.parametrize(
+    ("argv", "fits"),
+    [
+        (("push", "--porcelain", "/r/x.git", f"{_C}:{_TAG}"), True),
+        (("push", "--porcelain", "/r/x.git", f"+{_C}:{_TAG}"), False),  # forced
+        (("push", "--porcelain", "/r/x.git", f"{_C}:refs/tags/other-{_C}"), False),
+        (("push", "--porcelain", "/r/x.git", f"{_C}:refs/heads/lovspor-attestations"), False),
+        (("push", "--porcelain", "/r/x.git", f":{_TAG}"), False),  # a deletion
+        (("ls-remote", "/r/x.git", _TAG), True),
+        (("ls-remote", "/r/x.git", "refs/tags/*"), False),
+        (("update-index", "--add", "--cacheinfo", f"100644,{_C},releases/{'b' * 64}.sig"), True),
+        (("update-index", "--add", "--cacheinfo", f"100644,{_C},INDEX.md"), False),
+        (("update-index", "--add", "--cacheinfo", f"100755,{_C},releases/{'b' * 64}.sig"), False),
+        (("hash-object", "-t", "blob", "-w", "--stdin"), True),
+        (("hash-object", "-t", "blob", "-w", "/etc/passwd"), False),
+        (("mktree", "-z"), True),
+        (("mktree", "--missing"), False),
+    ],
+)
+def test_ar6b_adds_exactly_the_attestation_and_signature_shapes(
+    argv: tuple[str, ...], fits: bool
+) -> None:
+    assert allowed(argv) is fits
+
+
 def test_a_refused_vector_is_reported_by_its_command_alone(tmp_path: Path) -> None:
     with pytest.raises(GitPublishError) as refused:
         run_git(tmp_path, ("push", "--force", "/srv/r.git", "main"))

@@ -10,8 +10,9 @@ the signature is put in the ``gpgsig`` header, where Git keeps commit
 signatures. Git stores the object; ``HEAD`` and every ref stay where they were.
 
 **B7, validate the local commit.** It is read back and checked: its parent is
-the base, it changes exactly the proposal's paths, every blob is the bytes of
-the proposal (by Git's own blob id), and its signature verifies against the
+the base, it changes exactly the proposal's paths and (AR6b) the manifest's
+signature companion ``releases/<manifest sha256>.sig``, every blob is the bytes
+of the proposal or that signature (by Git's own blob id), and its signature verifies against the
 trust root as a key the root lists for the bot's principal, in the release
 namespace, at the check time.
 
@@ -35,12 +36,13 @@ from typing import Literal, NamedTuple, Protocol
 
 from lovspor.forarbeider.errors import ForarbeiderRefusedError, RefusalReason
 from lovspor.forarbeider.policy_trust import (
+    PUBLICATION_NAMESPACE,
     RELEASE_NAMESPACE,
     SignedBytes,
     TrustRoot,
     check_signature,
 )
-from lovspor.forarbeider.publication_models import PublicationTransaction
+from lovspor.forarbeider.publication_models import PublicationTransaction, release_signature_path
 from lovspor.forarbeider.publication_path_a import body, headline
 from lovspor.git_publish import GitAnswer, GitContext, GitPublishError, run_git
 
@@ -148,9 +150,15 @@ def split_signature(raw: bytes) -> tuple[bytes, bytes]:
 
 
 def build_commit(
-    clone: Path, transaction: PublicationTransaction, signer: Signer, at: datetime
+    clone: Path,
+    transaction: PublicationTransaction,
+    signing: tuple[Signer, datetime],
+    signature: bytes,
 ) -> str:
-    """B6: the signed commit of exactly the proposal, stored as an object; no ref moves.
+    """B6: the signed commit of exactly the proposal and its manifest's signature; no ref moves.
+
+    ``signature`` (AR6b) enters the commit as ``releases/<manifest sha256>.sig``,
+    a blob written from these bytes; it is never read from the working tree.
 
     Raises:
         ForarbeiderRefusedError: ``checkout_unverifiable`` when Git refuses a step.
@@ -158,7 +166,12 @@ def build_commit(
     _git(clone, ("read-tree", transaction.content.publication.base_commit))
     for item in transaction.content.files:
         _git(clone, ("add", "--", item.path))
+    blob = _git(clone, ("hash-object", "-t", "blob", "-w", "--stdin"), signature)
+    companion = release_signature_path(transaction.content.release_manifest_sha256)
+    entry = f"100644,{blob.decode('ascii').strip()},{companion}"
+    _git(clone, ("update-index", "--add", "--cacheinfo", entry))
     tree = _git(clone, ("write-tree",)).decode("ascii").strip()
+    signer, at = signing
     payload = commit_payload(tree, transaction, signer, at)
     signed = signed_object(payload, signer.sign(payload, RELEASE_NAMESPACE))
     return (
@@ -186,18 +199,27 @@ def _blobs(clone: Path, commit: str) -> dict[str, str]:
     return found
 
 
+def published_files(
+    transaction: PublicationTransaction, files: Mapping[str, bytes], signature: bytes
+) -> dict[str, bytes]:
+    """Every file the commit publishes: the proposal and the manifest's signature (AR6b)."""
+    found = {item.path: files[item.path] for item in transaction.content.files}
+    found[release_signature_path(transaction.content.release_manifest_sha256)] = signature
+    return found
+
+
 def _content_reasons(
-    clone: Path, commit: str, transaction: PublicationTransaction, files: Mapping[str, bytes]
+    clone: Path, commit: str, transaction: PublicationTransaction, wanted: Mapping[str, bytes]
 ) -> list[str]:
     base = transaction.content.publication.base_commit
     raw = _git(clone, ("cat-file", "commit", commit))
     reasons = [] if _parent(raw) == base else ["commit_parent_not_base"]
     changed = _git(clone, ("diff-tree", "--no-commit-id", "--name-only", "-r", "-z", base, commit))
     paths = sorted(p.decode() for p in changed.split(b"\0") if p)
-    if paths != sorted(item.path for item in transaction.content.files):
+    if paths != sorted(wanted):
         reasons.append("commit_paths_not_proposal")
     blobs = _blobs(clone, commit)
-    if any(blobs.get(item.path) != blob_id(files[item.path]) for item in transaction.content.files):
+    if any(blobs.get(path) != blob_id(data) for path, data in wanted.items()):
         reasons.append("commit_bytes_not_proposal")
     return reasons
 
@@ -205,13 +227,14 @@ def _content_reasons(
 def verify_commit(
     clone: Path,
     commit: str,
-    context: tuple[PublicationTransaction, Mapping[str, bytes]],
+    context: tuple[PublicationTransaction, Mapping[str, bytes], bytes],
     trust: tuple[TrustRoot, str, datetime],
 ) -> CommitCheck:
-    """B7: parent, paths, bytes and the bot's signature in the release namespace."""
-    transaction, files = context
+    """B7: parent, paths, bytes (the manifest signature included) and the commit signature."""
+    transaction, files, manifest_signature = context
     root, principal, at = trust
-    reasons = _content_reasons(clone, commit, transaction, files)
+    wanted = published_files(transaction, files, manifest_signature)
+    reasons = _content_reasons(clone, commit, transaction, wanted)
     payload, signature = split_signature(_git(clone, ("cat-file", "commit", commit)))
     check = check_signature(root, SignedBytes(payload, signature), RELEASE_NAMESPACE, at)
     signer = check.entry.principal if check.entry is not None else None
@@ -321,3 +344,76 @@ def ref_event(bare: Path, before: str, after: str) -> RefEvent | None:
             return None
         return RefEvent(before, after, " ".join(parts[2:-2]), at)
     return None
+
+
+# --- AR6b: the publication attestation's create-only tag -------------------------------------
+
+
+def attestation_commit(
+    clone: Path, files: Mapping[str, bytes], message: str, signed: tuple[Signer, datetime]
+) -> str:
+    """A root commit of exactly ``files`` (flat), signed by the bot in the publication namespace.
+
+    Blobs and the tree are written from these bytes; nothing is read from the
+    working tree, no index is touched and no ref moves.
+
+    Raises:
+        ForarbeiderRefusedError: ``checkout_unverifiable`` when Git refuses a step.
+    """
+    signer, at = signed
+    entries = b""
+    for name in sorted(files):
+        blob = _answer_out(clone, ("hash-object", "-t", "blob", "-w", "--stdin"), files[name])
+        entries += b"100644 blob %s\t%s\0" % (blob, name.encode())
+    tree = _answer_out(clone, ("mktree", "-z"), entries)
+    who = _identity(signer, at)
+    payload = b"tree %s\nauthor %s\ncommitter %s\n\n%s" % (tree, who, who, message.encode())
+    signature = signer.sign(payload, PUBLICATION_NAMESPACE)
+    raw = signed_object(payload, signature)
+    return _answer_out(clone, ("hash-object", "-t", "commit", "-w", "--stdin"), raw).decode()
+
+
+def _answer_out(clone: Path, argv: tuple[str, ...], stdin: bytes) -> bytes:
+    try:
+        answer = run_git(clone, argv, stdin)
+    except GitPublishError as error:
+        raise _refused(argv[0]) from error
+    if answer.code != 0:
+        raise _refused(argv[0])
+    return answer.out.strip()
+
+
+def remote_ref(bare: Path, ref: str) -> str | None:
+    """The object a tag of the bare remote names, ``None`` when there is no such tag.
+
+    Raises:
+        ForarbeiderRefusedError: ``checkout_unverifiable`` when the remote cannot be read.
+    """
+    answer = _answer(bare.parent, ("ls-remote", str(bare), ref))
+    if answer.code != 0:
+        raise _refused("ls-remote")
+    line = answer.out.decode("ascii", "replace").strip()
+    return line.split()[0] if line else None
+
+
+def push_attestation(clone: Path, bare: Path, commit: str, ref: str) -> Sent:
+    """Create the tag ``ref`` at ``commit`` on the bare remote, once; never forced.
+
+    ``published``: the tag names the commit; ``refused``: it already named
+    another (Git refuses to move a tag without force, and the remote refuses
+    non-fast-forward updates); anything else: ``outcome_unknown``.
+    """
+    argv = ("push", "--porcelain", str(bare), f"{commit}:{ref}")
+    try:
+        answer = run_git(clone, argv)
+    except GitPublishError:
+        return Sent("outcome_unknown", commit, ("push_could_not_run",))
+    try:
+        landed = remote_ref(bare, ref)
+    except ForarbeiderRefusedError:
+        return Sent("outcome_unknown", commit, ("remote_unreadable_after_push",))
+    if landed == commit:
+        return Sent("published", commit, ())
+    if answer.code != 0 and landed is not None:
+        return Sent("refused", commit, ("attestation_tag_exists",))
+    return Sent("outcome_unknown", commit, ("remote_not_at_pushed_commit",))

@@ -388,7 +388,8 @@ def test_path_a_sends_exactly_the_proposal_and_records_before_and_after(rig_a: R
     }
     for item in rig_a.transaction.content.files:
         assert sha256(sent[item.path]).hexdigest() == item.sha256
-    assert set(sent) == {item.path for item in rig_a.transaction.content.files}
+    companion = f"releases/{manifest}.sig"  # AR6b: the manifest's published signature
+    assert set(sent) == {item.path for item in rig_a.transaction.content.files} | {companion}
     assert given["fileChanges"].get("deletions", []) == []
     assert "createCommitOnBranch" in payload["query"]
     assert outcome.commit == github.head_oid
@@ -578,7 +579,9 @@ def test_path_b_pushes_a_bot_signed_commit_of_exactly_the_proposal(rig_b: Rig) -
     changed = git(
         rig_b.bare, "diff-tree", "--no-commit-id", "--name-only", "-r", commit
     ).splitlines()
-    assert sorted(changed) == sorted(item.path for item in rig_b.transaction.content.files)
+    companion = f"releases/{rig_b.transaction.content.release_manifest_sha256}.sig"
+    proposed = [item.path for item in rig_b.transaction.content.files]
+    assert sorted(changed) == sorted([*proposed, companion])  # AR6b
     for item in rig_b.transaction.content.files:
         blob = raw_git(rig_b.bare, "cat-file", "blob", f"{commit}:{item.path}")
         assert sha256(blob).hexdigest() == item.sha256
@@ -696,6 +699,8 @@ def test_the_publication_git_has_no_force_shape() -> None:
         "ls-tree",
         "ls-remote",
         "push",
+        "update-index",  # AR6b: only a manifest signature companion, by its grammar
+        "mktree",  # AR6b: only an attestation's two-file root tree
     }
 
 

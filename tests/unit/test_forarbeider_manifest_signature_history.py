@@ -158,13 +158,14 @@ def claim_of(rig: Rig) -> ManifestClaim:
 
 
 @pytest.mark.parametrize("change", ["removed", "corrupted", "the_others"])
-def test_a_lost_historical_record_halts_and_never_adopts_another(
+def test_a_lost_historical_record_no_longer_matters_after_publication(
     pair: tuple[Rig, Rig], change: str
 ) -> None:
-    """Fail-closed: the receipt on record is never re-derived from other evidence."""
+    """AR6b: the published signature is the evidence; the clone's record is only the signer's."""
     first, second = pair
     adapters = published_and_recovered(first)
     second_signed_in(first.clone, second)
+    before = receipts_of(first)
     target = record(first)
     if change == "removed":
         target.unlink()
@@ -174,14 +175,16 @@ def test_a_lost_historical_record_halts_and_never_adopts_another(
         target.write_bytes(payload)
         target.chmod(0o600)
 
-    with pytest.raises(ForarbeiderRefusedError) as raised:
-        recover(first.request(), adapters.at(NOW))
+    outcome = recover(first.request(), adapters.at(NOW))
 
-    assert raised.value.detail == "receipt_conflict"
-    assert publication_attempts.latched(first.workspace)
+    assert outcome.classification == "already_receipted"
+    assert receipts_of(first) == before
+    assert not publication_attempts.latched(first.workspace)
 
 
-def test_a_fresh_recovery_without_its_own_record_is_never_verified(pair: tuple[Rig, Rig]) -> None:
+def test_a_fresh_recovery_without_its_own_record_verifies_the_published_one(
+    pair: tuple[Rig, Rig],
+) -> None:
     first, second = pair
     adapters = Adapters(first)
     assert execute(first.request(), adapters.at(NOW)).status == "published"
@@ -193,13 +196,9 @@ def test_a_fresh_recovery_without_its_own_record_is_never_verified(pair: tuple[R
     receipt = outcome.receipt
     assert receipt is not None
     (found,) = [c for c in receipt.integrity_checks if c.name == CHECK]
-    assert (found.status, found.reasons) == (
-        "unavailable",
-        ("manifest_signature_not_held_ar6b_pending",),
-    )
-    assert receipt.classification == "halted_integrity_failed"
-    assert outcome.classification != "not_published"
-    assert publication_attempts.latched(first.workspace)
+    assert (found.status, found.reasons) == ("passed", ())
+    assert receipt.classification == "published_authorized"
+    assert not publication_attempts.latched(first.workspace)
 
 
 def test_the_retired_shared_file_is_never_adopted(pair: tuple[Rig, Rig]) -> None:

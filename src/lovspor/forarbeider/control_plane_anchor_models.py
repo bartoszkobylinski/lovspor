@@ -47,7 +47,7 @@ LEGACY_FAMILIES: Final[frozenset[Family]] = frozenset({"stop_latch", "recovery_r
 #: Each family, the schema of its records and the kind of scope it is anchored in.
 FAMILIES: Final[dict[Family, tuple[str, ScopeKind]]] = {
     "publication_attempts": ("forarbeider_publication_attempt/1", "transaction"),
-    "recovery_receipts": ("publication-receipt/1", "workspace"),
+    "recovery_receipts": ("publication-receipt/2", "workspace"),
     "stop_latch": ("forarbeider_publication_stop_latch_event/1", "workspace"),
     "budget_ledger": ("forarbeider_budget_ledger_entry/1", "ledger"),
     "control_history": ("forarbeider_release_control/1", "policy"),

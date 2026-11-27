@@ -78,7 +78,11 @@ from lovspor.forarbeider.publication_execution_models import (
     AuthorizationEvidence,
 )
 from lovspor.forarbeider.publication_ledger import BudgetLedger
-from lovspor.forarbeider.publication_manifest_signature import ManifestClaim, verify_proposed
+from lovspor.forarbeider.publication_manifest_signature import (
+    ManifestClaim,
+    held_signature,
+    verify_proposed,
+)
 from lovspor.forarbeider.publication_path_b import Signer
 from lovspor.forarbeider.publication_quarantine import (
     QuarantineClaim,
@@ -259,6 +263,36 @@ def _files(request: ExecutionRequest) -> dict[str, bytes]:
     return found
 
 
+def _manifest_signature(request: ExecutionRequest) -> bytes:
+    """AR6b: the manifest's recorded signature, to be published with the commit.
+
+    Raises:
+        ForarbeiderRefusedError: ``release_not_eligible: manifest_signature_missing``
+            when none is recorded; ``unsafe_output_path`` for an unsafe record.
+    """
+    digest = request.inputs.transaction.content.release_manifest_sha256
+    held = held_signature(request.clone, digest)
+    if not held:
+        raise _not_eligible("manifest_signature_missing")
+    return held
+
+
+def _sealed_signature(request: ExecutionRequest, evidence: AuthorizationEvidence) -> bytes:
+    """The recorded signature, read once, and exactly the one the evidence sealed.
+
+    Raises:
+        ForarbeiderRefusedError: ``release_not_eligible:
+            authorization_stale:manifest_signature:not_the_evidences``.
+    """
+    try:
+        held = _manifest_signature(request)
+    except ForarbeiderRefusedError as error:
+        raise _not_eligible("authorization_stale:manifest_signature:missing") from error
+    if sha256(held).hexdigest() != evidence.release_manifest_signature_sha256:
+        raise _not_eligible("authorization_stale:manifest_signature:not_the_evidences")
+    return held
+
+
 def _remote(request: ExecutionRequest, environment: Simulation) -> Callable[[], str | None]:
     """The read of the remote ``main``, through an adapter proved sandboxed first.
 
@@ -289,15 +323,25 @@ def _facts(request: ExecutionRequest, environment: Simulation, now: datetime) ->
     if signer is None:
         raise _not_eligible("adapter")
     try:
-        files = _files(request)
-        commit = publication_path_b.build_commit(request.clone, transaction, signer, now)
-        trust = (request.root, request.inputs.settings.bot_principal, now)
-        check = publication_path_b.verify_commit(request.clone, commit, (transaction, files), trust)
+        check = _local_commit(request, signer, now)
     except ForarbeiderRefusedError as error:
         return AdapterFacts(
             local_commit=None, commit_reasons=(f"local_commit:{error.detail}",), latched=latched
         )
     return AdapterFacts(local_commit=check.commit, commit_reasons=check.reasons, latched=latched)
+
+
+def _local_commit(
+    request: ExecutionRequest, signer: Signer, now: datetime
+) -> publication_path_b.CommitCheck:
+    """B6 and B7: the bot-signed commit of the proposal and its manifest signature, checked."""
+    transaction = request.inputs.transaction
+    files = _files(request)
+    signature = _manifest_signature(request)
+    commit = publication_path_b.build_commit(request.clone, transaction, (signer, now), signature)
+    trust = (request.root, request.inputs.settings.bot_principal, now)
+    context = (transaction, files, signature)
+    return publication_path_b.verify_commit(request.clone, commit, context, trust)
 
 
 # --- execution -----------------------------------------------------------------------------
@@ -450,6 +494,7 @@ def _publish(
     if not isinstance(environment, Simulation):  # _require_authorized proved it is
         raise _not_eligible("production_execution_disabled")
     _still_current(evidence, request, now)
+    signature = _sealed_signature(request, evidence)
     _sandboxed(environment, evidence.path)
     claim = workspace_writer.claim(request, step.attempt_id, now)
     try:
@@ -457,7 +502,7 @@ def _publish(
     except ForarbeiderRefusedError:
         workspace_writer.release(request, claim, environment.clock())
         raise
-    sent = _send(request, environment, evidence)
+    sent = _send(request, environment, (evidence, signature))
     outcome = _after(request, environment, evidence, sent)
     workspace_writer.release(request, claim, environment.clock())
     return outcome
@@ -601,14 +646,18 @@ def _after(
 
 
 def _send(
-    request: ExecutionRequest, environment: Simulation, evidence: AuthorizationEvidence
+    request: ExecutionRequest,
+    environment: Simulation,
+    sealed: tuple[AuthorizationEvidence, bytes],
 ) -> publication_path_a.Sent | publication_path_b.Sent:
+    """Send once; ``sealed`` is the evidence and the manifest signature it sealed (AR6b)."""
+    evidence, signature = sealed
     if evidence.path == "A":
         if environment.transport is None:
             raise _not_eligible("adapter")
         transport = publication_sandbox.verified_transport(environment.transport)
         payload = publication_path_a.payload_of(
-            request.inputs.transaction, _files(request), request.inputs.settings
+            request.inputs.transaction, _files(request), request.inputs.settings, signature
         )
         return publication_path_a.send(transport, payload, request.inputs.settings)
     if environment.remote is None or evidence.local_commit is None:
