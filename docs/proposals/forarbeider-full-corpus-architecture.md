@@ -1503,6 +1503,50 @@ Remaining gaps, classified:
   - Path A's simulated endpoint cannot represent a merge commit, so the merge case is tested on path B only. On path A, a boundary off `main` ends as an unreadable commit, not a root.
   - The AR7 pin, the #1037 source binding, the #1040 key-validity redesign, the #1046 tag rulesets, ledger v2, ADR-0028 and `sync.yml` are untouched.
 
+**AR7a status: independently pinned, monotonic checkpoint for a witness log (foundation).** A witness log whose latest state is pinned outside the request, the workspace and the witness store, so rollback, substitution and equivocation are caught. It is a foundation that an AR5 family can adopt later. No AR5 anchor is migrated and no AR5 verification changes. Simulation only; production stays denied; no flag is enabled. #1037 stays open: this PR does not bind a quarantine source.
+
+- **What AR5 cannot detect alone** (`test_forarbeider_ar5_rollback_gap.py`, strict `xfail` until adoption). A witness signature proves who made an anchor, not that it is the newest or the only one. The AR5 pin is an optional value the caller keeps in memory; nothing persists it. Run against the shipped AR5 witness, each of these verifies:
+  - the witness and the store restored together from an older copy;
+  - the same, under an old pin;
+  - two copies of the witness store, one key, each growing its own history;
+  - a competing signed successor written after a restore;
+  - a restart, which forgets the pin.
+- **Log identity (A).**
+  - The owner approves one log by signing a `LogBootstrap` in the new owner namespace `lovspor-forarbeider-log`.
+  - The bootstrap names the repository, a purpose, a nonce, the witness keys that may sign checkpoints and the authority (a local bare repository and a ref `refs/heads/witness/<name>`).
+  - The log id is the SHA-256 of the canonical bootstrap. So it names what the owner approved, never a key, a namespace or a directory, and the caller cannot choose where the pin is read.
+  - The genesis checkpoint follows from the log id, so approving the bootstrap approves the genesis.
+- **History consistency (B).**
+  - A `Checkpoint` names the log id, its sequence (the number of entries), the chained root over every entry, the entry it added and its predecessor's digest.
+  - A witness key signs it in the new witness namespace `lovspor-forarbeider-checkpoint`. The key must be one the bootstrap lists and the trust root holds, unrevoked, at the check time.
+  - `consistent(older, newer, proof)` checks a proof link by link. It shows only that one checkpoint extends another, never that no newer one exists.
+- **Independent latest-state pin (C).**
+  - **The authority.** The pin is a Git ref whose commit holds the newest signed checkpoint. It moves only by a fast-forward push of a child of the commit the writer verified; that push is the compare-and-swap. Receive-pack updates the ref under its lock, so of two concurrent pushes at most one lands.
+  - **Monotonic by the authority's own settings.** `receive.denyNonFastForwards` and `receive.denyDeletes` refuse a forced rewind, a forced sibling and a deletion from any client. Git applies both only to `refs/heads/*`, which is why the ref lives there. A verifier refuses an authority without both settings (`authority_not_monotonic`).
+  - **Replay of an older signed checkpoint.** Any writer of the authority could push a fast-forward commit holding one. So the pinned sequence must equal the ref's commit count minus one, the ref may hold no merge, the pin commit holds exactly one file, and the pinned checkpoint must link to the one its parent commit pins.
+  - **Independence.** The authority, the store and the workspace must not be one another or nested. The authority must be an absolute local path to a `.git` repository; a URL has no command shape (`lovspor.git_checkpoint`, no force shape).
+- **Non-equivocation (D).** Two stores sharing one key can each sign a successor, but the pin names one. The other store then holds a checkpoint the pin contradicts and is `diverged`, permanently. A forked history pushed on top of the pin fails the link check (`pin_invalid`).
+- **Currentness is not consistency.**
+  - `current` returns `verified` only when the store's head is the pinned checkpoint.
+  - Otherwise it returns one of: `pending_advance`, `unpinned_tail`, `store_rolled_back`, `diverged`, `store_invalid`, `store_unavailable`, `pin_missing`, `pin_invalid`, `pin_behind_known`, `authority_unavailable`, `authority_not_monotonic`, `authority_not_independent`, `bootstrap_invalid`.
+  - `standing` judges a presented checkpoint as `current`, `stale`, `conflicting`, `unpinned` or `invalid`.
+  - `require_current` refuses every status except `verified`. It is the gate a dependent publication must pass; this PR wires it into nothing.
+- **Bootstrap and advancement.**
+  - No trust on first use: `current` never creates a pin, and a missing pin is `pin_missing`. `bootstrap` creates the pin once, from the owner-approved genesis, and never over an existing pin or a non-empty store.
+  - `advance` holds the store's lock (a leaf) and works in order:
+    1. it verifies the current state;
+    2. it writes the signed successor to the store, create-only;
+    3. it moves the pin from the commit it verified.
+  - A crash between steps 2 and 3 leaves `pending_advance`, and the last trusted pin is intact. The next `advance` completes it, and a retry of the same entry is `completed`, then `already_applied`.
+  - An authority that cannot be read or moved denies the advance and every dependent.
+- **Trust assumptions.**
+  - The pin is as monotonic as the authority. Whoever administers the authority repository can change its settings or rewrite the ref outside receive-pack.
+  - A caller that passes the newest checkpoint it already trusts (`known`) catches such a rewind (`pin_behind_known`).
+  - The only authority here is a local bare repository (simulation). A production authority would be a GitHub ref whose ruleset forbids force pushes and deletion, with no bypass for the runner's App. It needs its settings verified (the AR7 settings verifier, #1046) and is not implemented.
+  - Keys are judged at the check time (#1040).
+  - `ENGINE_TRUST_ROOT_SHA256` stays the immutable digest of the shipped trust root, never a latest-checkpoint pin. The shipped files are unchanged.
+- **Not in this PR:** adopting the checkpoint in any AR5 family, `PublicationSourceBinding` and quarantine chain selection (#1037), ledger v2, GitHub rulesets (#1046), production publication, the AR8 auditor, ADR-0028 and `sync.yml`. Owner approval is needed only for a bootstrap and material trust changes, never per batch.
+
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 
 **Rollback:** the stop file, then revoking the policy, then revoking the credential. Published commits are withdrawn forward only (§9.7).

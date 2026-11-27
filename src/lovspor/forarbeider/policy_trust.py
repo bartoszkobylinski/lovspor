@@ -15,13 +15,17 @@ crosswalk approval uses (``ssh-keygen -Y``, #792, #840):
   AR1b added the limits and control namespaces for signed limits and
   stop/resume records, AR2 the inventory
   namespace for the owner-signed document inventory, AR3 the quarantine
-  namespace for owner-signed quarantine exceptions) or the bot's
+  namespace for owner-signed quarantine exceptions, AR7a the log namespace
+  ``lovspor-forarbeider-log`` for the owner-approved bootstrap of a witness
+  log) or the bot's
   execution key (``lovspor-forarbeider-release`` and/or
   ``lovspor-forarbeider-publication``), or, since AR5a, the anchor
-  witness's key (``lovspor-forarbeider-anchor`` only: the authority outside
-  the runner that countersigns control-plane anchors), and carries a UTC validity window. A
-  key holding both roles, a wildcard principal, an entry without a window, any
-  other option or a key listed twice refuses the whole root;
+  witness's key (``lovspor-forarbeider-anchor`` and, since AR7a,
+  ``lovspor-forarbeider-checkpoint``: the authority outside the runner that
+  countersigns control-plane anchors and witness-log checkpoints), and carries
+  a UTC validity window. A key holding both roles, a wildcard principal, an
+  entry without a window, any other option or a key listed twice refuses the
+  whole root;
 - ``revoked-keys``: public keys no verification accepts.
 
 The engine ships both files under ``trust/``, empty of keys: D6 and D11 are
@@ -56,6 +60,10 @@ CONTROL_NAMESPACE = "lovspor-forarbeider-control"
 INVENTORY_NAMESPACE = "lovspor-forarbeider-inventory"
 QUARANTINE_NAMESPACE = "lovspor-forarbeider-quarantine"
 ANCHOR_NAMESPACE = "lovspor-forarbeider-anchor"
+#: AR7a: the witness signs checkpoints of a witness log in its own namespace.
+CHECKPOINT_NAMESPACE = "lovspor-forarbeider-checkpoint"
+#: AR7a: the owner approves a witness log's identity (its bootstrap) in this namespace.
+LOG_NAMESPACE = "lovspor-forarbeider-log"
 OWNER_NAMESPACES = frozenset(
     {
         POLICY_NAMESPACE,
@@ -63,10 +71,11 @@ OWNER_NAMESPACES = frozenset(
         CONTROL_NAMESPACE,
         INVENTORY_NAMESPACE,
         QUARANTINE_NAMESPACE,
+        LOG_NAMESPACE,
     }
 )
 BOT_NAMESPACES = frozenset({RELEASE_NAMESPACE, PUBLICATION_NAMESPACE})
-WITNESS_NAMESPACES = frozenset({ANCHOR_NAMESPACE})
+WITNESS_NAMESPACES = frozenset({ANCHOR_NAMESPACE, CHECKPOINT_NAMESPACE})
 TRUST_DIRECTORY = Path(__file__).with_name("trust")
 SIGNERS_FILE = "policy-signers"
 REVOKED_FILE = "revoked-keys"
