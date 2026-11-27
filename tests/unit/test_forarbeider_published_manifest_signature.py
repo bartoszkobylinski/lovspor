@@ -12,13 +12,20 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.forarbeider import publication_attempts, publication_path_b, publication_stage
+from lovspor.forarbeider import (
+    publication_attempts,
+    publication_execute,
+    publication_path_b,
+    publication_stage,
+)
 from lovspor.forarbeider.errors import ForarbeiderRefusedError
-from lovspor.forarbeider.publication_execute import execute
-from lovspor.forarbeider.publication_manifest_signature import held_signature
+from lovspor.forarbeider.policy_trust import RELEASE_NAMESPACE
+from lovspor.forarbeider.publication_execute import execute, publish_authorized
+from lovspor.forarbeider.publication_manifest_signature import held_signature, signature_path
 from lovspor.forarbeider.publication_remote_recovery import recover
+from tests.unit.forarbeider_authorization_support import sign
 from tests.unit.forarbeider_execution_support import NOW, Rig, make_rig
-from tests.unit.test_forarbeider_publication_stale_authorization import Adapters
+from tests.unit.test_forarbeider_publication_stale_authorization import Adapters, authorized
 
 CHECK = "ar6_release_manifest_signature"
 
@@ -89,3 +96,23 @@ def test_a_later_base_may_hold_earlier_published_signatures(rig: Rig) -> None:
     with pytest.raises(ForarbeiderRefusedError) as raised:
         publication_stage.base_files(rig.clone, journal)
     assert raised.value.detail == "base_tree"
+
+
+def test_the_bytes_sent_are_exactly_the_signature_the_evidence_sealed(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The last guard, isolated: the record read for the send must be the sealed one."""
+    adapters = Adapters(rig)
+    evidence = authorized(rig.request(), adapters.at(NOW))
+    monkeypatch.setattr(publication_execute, "_still_current", lambda *_: None)
+    target = rig.clone / signature_path(rig.transaction.content.release_manifest_sha256)
+    target.unlink()
+    manifest = publication_stage.read_file(rig.clone, rig.transaction.content.release_manifest_path)
+    target.write_bytes(sign(rig.stranger, manifest, RELEASE_NAMESPACE))
+    target.chmod(0o600)
+
+    with pytest.raises(ForarbeiderRefusedError) as raised:
+        publish_authorized(evidence, rig.request(), adapters.at(NOW))
+
+    assert raised.value.detail == "authorization_stale:manifest_signature:not_the_evidences"
+    assert not adapters.sent()

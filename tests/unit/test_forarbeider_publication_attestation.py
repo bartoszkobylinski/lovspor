@@ -60,6 +60,8 @@ from tests.unit.forarbeider_publication_support import git
 from tests.unit.forarbeider_release_control_support import BOT
 from tests.unit.test_forarbeider_publication_stale_authorization import Adapters
 
+CHECK = "ar6_release_manifest_signature"
+
 
 @pytest.fixture(params=["A", "B"])
 def rig(request: pytest.FixtureRequest, tmp_path: Path) -> Rig:
@@ -335,6 +337,9 @@ def test_a_missing_or_substituted_manifest_signature_is_invalid_evidence(
 
     assert proof.status == "invalid" and reason in proof.reasons, proof.reasons
     assert outcome.classification == "halted_integrity_failed"
+    assert outcome.receipt is not None
+    (found,) = [c for c in outcome.receipt.integrity_checks if c.name == CHECK]
+    assert found.status == "failed" and reason in found.reasons, found.reasons
     assert outcome.attestation is None
     assert publication_attempts.latched(rig_a.workspace)
     detail = refused(lambda: attest(rig_a.request(), adapters.at(NOW), bot(rig_a)))
@@ -454,13 +459,54 @@ def test_an_invalid_attestation_is_never_attested_and_halts(rig: Rig, case: str)
     assert store.write(commit, files, NOW).status == "created"
 
     proof = read(rig, adapters, commit)
-    detail = refused(lambda: attest(rig.request(), adapters.at(NOW), bot(rig)))
     outcome = recover(rig.request(), adapters.at(NOW))
+    latched_by_recovery = publication_attempts.latched(rig.workspace)
+    detail = refused(lambda: attest(rig.request(), adapters.at(NOW), bot(rig)))
 
     assert proof.status == "invalid" and reason in proof.reasons, proof.reasons
-    assert detail.startswith("attestation_conflict:")
     assert outcome.attestation == "invalid"
+    assert latched_by_recovery
+    assert detail.startswith("attestation_conflict:")
+
+
+def test_an_attestation_resting_on_another_receipt_is_invalid_for_recovery(rig: Rig) -> None:
+    """The bot's statement verifies and its facts are the remote's, but not this receipt's."""
+    adapters, commit, _ = published(rig)
+
+    def other_receipt(found: PublicationAttestation) -> PublicationAttestation:
+        claims = found.claims.model_copy(update={"receipt_sequence": 7})
+        return found.model_copy(update={"claims": claims})
+
+    files = forged(rig, adapters, commit, other_receipt)
+    assert source(rig, adapters, builder=True).attestations.write(commit, files, NOW).status == (
+        "created"
+    )
+
+    proof = read(rig, adapters, commit)
+    outcome = recover(rig.request(), adapters.at(NOW))
+    latched_by_recovery = publication_attempts.latched(rig.workspace)
+    detail = refused(lambda: attest(rig.request(), adapters.at(NOW), bot(rig)))
+
+    assert proof.status == "attested"  # a reader can check the facts, not the runner's claims
+    assert outcome.attestation == "invalid"
+    assert latched_by_recovery
+    assert detail == "attestation_conflict:attestation_not_this_receipts"
+
+
+def test_a_receipt_the_remote_contradicts_is_never_attested(rig: Rig) -> None:
+    adapters, _, outcome = published(rig)
+    assert outcome.receipt is not None
+    forged_receipt = outcome.receipt.model_copy(update={"bot_fingerprint": "SHA256:forged"})
+    held = rig.workspace / "receipts" / "000001.json"
+    held.unlink()
+    held.write_text(canonical_text(forged_receipt))
+    held.chmod(0o600)
+
+    detail = refused(lambda: attest(rig.request(), adapters.at(NOW), bot(rig)))
+
+    assert detail == "attestation_conflict:receipt_contradicted:bot_fingerprint"
     assert publication_attempts.latched(rig.workspace)
+    assert tag_count(rig, adapters) == 0
 
 
 def test_an_attestation_replayed_under_another_commit_is_refused(rig: Rig) -> None:
