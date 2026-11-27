@@ -7,7 +7,7 @@ A file passes only if all of these hold:
 - given the previous release, every earlier revision is still present,
   byte-identical (ruling D6: nothing rewritten, nothing deleted);
 - given the capture, a rebuild from the cached bytes reproduces the parsed
-  identity of every current record's evidence.
+  identity of every current record's evidence, and its decision (#1047).
 
 A current record the capture cannot reproduce is reported as unverified. That
 is not a failure of `check`, but it bars the record from the release-candidate
@@ -102,6 +102,8 @@ def _judge(found: Provenance, law_id: str, record: Record, rebuilt: Record | Non
         found.unverified.append(law_id)
     elif _identities(record) != _identities(rebuilt):
         found.problems.append(f"{law_id}: evidence identities are not reproduced from the capture")
+    elif record["decision"] != rebuilt["decision"]:
+        found.problems.append(f"{law_id}: decision is not reproduced from the capture")
     elif _raw(record) != _raw(rebuilt):
         found.drifted.append(law_id)
 
