@@ -1539,7 +1539,7 @@ Remaining gaps, classified:
     3. it moves the pin from the commit it verified.
   - A crash between steps 2 and 3 leaves `pending_advance`, and the last trusted pin is intact. The next `advance` completes it, and a retry of the same entry is `completed`, then `already_applied`.
   - An authority that cannot be read or moved denies the advance and every dependent.
-- **Selection is not signature validity (#1052).** The bootstrap reaches `current` from the caller. The owner can approve two logs for one repository and purpose (other nonces, other authorities), and each verifies. A verdict proves only that the offered log is owner-approved and that its history is pinned by its own authority. It never proves that this log is *the* one permitted for that repository and purpose. **Authoritative selection is unavailable in AR7a** (strict `xfail` `test_only_the_one_permitted_log_of_a_repository_and_purpose_verifies`). The proposed minimum independent source is the approved log id per `(repository, purpose)` in reviewed engine trust material, beside the trust root that `ENGINE_TRUST_ROOT_SHA256` pins in code. It would change only by a reviewed engine PR, never through a request, the witness store or the authority. That changes the engine's trust anchor, so it belongs to AR7b's binding. Until then no dependent may treat `verified` as selection.
+- **Selection is not signature validity (#1052).** The bootstrap reaches `current` from the caller. The owner can approve two logs for one repository and purpose (other nonces, other authorities), and each verifies. A verdict proves only that the offered log is owner-approved and that its history is pinned by its own authority. It never proves that this log is *the* one permitted for that repository and purpose. AR7a does not decide that; AR7b-1 does (below).
 - **Trust assumptions.**
   - The pin is as monotonic as the authority. Whoever administers the authority repository can change its settings or rewrite the ref outside receive-pack.
   - A caller that passes the newest checkpoint it already trusts (`known`) catches such a rewind (`pin_behind_known`).
@@ -1547,6 +1547,44 @@ Remaining gaps, classified:
   - Keys are judged at the check time (#1040).
   - `ENGINE_TRUST_ROOT_SHA256` stays the immutable digest of the shipped trust root, never a latest-checkpoint pin. The shipped files are unchanged.
 - **Not in this PR:** adopting the checkpoint in any AR5 family, `PublicationSourceBinding` and quarantine chain selection (#1037), ledger v2, GitHub rulesets (#1046), production publication, the AR8 auditor, ADR-0028 and `sync.yml`. Owner approval is needed only for a bootstrap and material trust changes, never per batch.
+
+
+**AR7b-1 status: authoritative witness-log selection (#1052).** The engine selects exactly one witness log per repository and purpose. AR7a still verifies whatever log it is offered; selection is a separate fact. Simulation only. No AR5 call site changes, no quarantine source is bound (#1037), and no flag is enabled.
+
+- **Red at eef5351c.** `require_current` was AR7a's only gate. Run with genuine owner signatures on real bare authorities, it accepted:
+  - a second owner-approved, pinned log for the same repository and purpose;
+  - a caller switching between logs;
+  - a purpose nobody registered;
+  - a trust root the caller built.
+  No mapping existed, so every log passed.
+- **Trust anchor.** `trust/witness-logs` ships with the engine. `ENGINE_LOG_REGISTRY_SHA256` pins its digest in code: SHA-256 over `lovspor-forarbeider-log-registry/1\n` and the file's bytes. It is a second constant, beside `ENGINE_TRUST_ROOT_SHA256`, whose meaning is unchanged. Only a registry whose bytes match is `engine_pinned`. The shipped registry is empty, so production selects nothing.
+- **Mapping format.**
+  - ASCII, one line per log: `<owner>/<repository> <purpose> <log_id>`, where `log_id` is `log_id_of` of the canonical owner-signed bootstrap. Comment lines begin with `#`.
+  - A repository and purpose appear once, and so does a log id. A line out of format refuses the whole registry (`registry_invalid`).
+  - `load_log_registry()` takes no directory, so no caller can supply or override the mapping.
+- **Selection contract.** `select(witnessing)` returns a `SelectionVerdict` with three separate flags:
+  - `owner_approved`: the bootstrap is canonical and owner-signed;
+  - `authoritative`: the engine-pinned registry maps the bootstrap's repository and purpose to exactly this log id, judged under the engine-pinned trust root;
+  - `pinned_consistent`: AR7a's `current` is `verified`, so the whole lineage holds and the head is the pin.
+- **Statuses.** `selected` only when all three flags hold. Otherwise one of:
+  - `bootstrap_invalid`;
+  - `registry_unavailable`, `registry_invalid` or `registry_not_engine_pinned`;
+  - `trust_root_not_engine_pinned`;
+  - `log_unregistered`, for a missing mapping or an unknown repository or purpose;
+  - `log_not_selected`, for a second log or a wrong identity;
+  - `log_not_current`, carrying AR7a's status as the reason.
+- **Order and gate.** The authority is read only for a selected log. `require_selected` is the publication-facing gate: it requires all three flags and returns the selected log's pinned checkpoint and the registry digest. `require_current` keeps its AR7a meaning (consistency only); nothing in `src` imports the registry yet.
+- **Rotation and migration.**
+  1. The owner signs the new log's bootstrap.
+  2. The witness bootstraps its pin.
+  3. One reviewed engine PR changes the registry line and `ENGINE_LOG_REGISTRY_SHA256` together.
+
+  From that build on, the old log is `log_not_selected`. Its history stays verifiable through AR7a, but nothing selects it and nothing falls back to it. Editing the file without the digest, or restoring an older file, is `registry_not_engine_pinned`. Nothing is selected on first use, and nothing is chosen from a signature, a pin, a directory or the newest log seen.
+- **Remaining gaps.**
+  - The registry is only as reviewed as the engine's merge process: whoever can merge to the engine can rotate.
+  - `ENGINE_TRUST_ROOT_SHA256` still pins an empty trust root, so no production log can be selected until D6/D11 are accepted.
+  - AR5 families do not call `require_selected` yet. Adoption is a separate migration, with #1037 and the PublicationSourceBinding.
+  - Keys are still judged at check time (#1040).
 
 **Migration:** the manual B1b path stays for exceptions and for the period before AR1–AR8 land. No release has happened yet [O], so nothing published needs migrating.
 

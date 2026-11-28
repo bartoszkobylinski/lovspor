@@ -9,8 +9,8 @@ signatures, a real bare Git authority and real pushes:
    link. Every checkpoint from genesis to the tip must verify and link.
 2. **Selection.** Two logs the owner approved for one repository and purpose
    both verify. A verdict proves that the offered log is owner-approved and
-   pinned (A), never that it is *the* log (B): authoritative selection needs an
-   approved digest held outside the request and the store, which AR7a has not.
+   pinned (A), never that it is *the* log (B). Since AR7b-1, B is the engine's
+   reviewed registry (``witness_log_registry``), never this module's verdict.
 """
 
 from pathlib import Path
@@ -239,18 +239,9 @@ def test_two_owner_approved_logs_each_verify_their_own_pin(world: World) -> None
     assert first.pinned.root_sha256 != second.pinned.root_sha256
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AR7b: authoritative selection needs the approved log id held outside the request "
-    "and the witness store; AR7a has no such source, so selection is unavailable (#1037)",
-)
-def test_only_the_one_permitted_log_of_a_repository_and_purpose_verifies(world: World) -> None:
-    """B: of two owner-approved logs for one repository and purpose, at most one may verify."""
-    other = second_log(world)
-
-    statuses = {world.current().status, world.current(log=other).status}
-
-    assert statuses != {"verified"}
+# B, the one permitted log, is not AR7a's to decide: ``current`` is consistency only, and
+# selection is ``witness_log_registry.require_selected`` (AR7b-1,
+# ``test_forarbeider_witness_log_selection.py``).
 
 
 # --- helpers -------------------------------------------------------------------------------------

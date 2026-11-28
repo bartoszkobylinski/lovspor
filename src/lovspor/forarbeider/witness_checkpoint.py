@@ -43,8 +43,8 @@ invalid one fails the log closed for good.
 **Selection is not validity.** The bootstrap comes from the caller. Two logs
 the owner approved for one repository and purpose each verify: a verdict says
 the offered log is owner-approved and pinned, never that it is *the* log.
-Authoritative selection needs the approved log id held outside the request
-and the store (AR7b); AR7a does not provide it (#1052).
+Authoritative selection is the engine's reviewed registry, outside the request
+and the store: :mod:`~lovspor.forarbeider.witness_log_registry` (AR7b-1, #1052).
 
 **Currentness is not consistency.** :func:`current` decides whether the
 store's head is the pinned checkpoint (``verified``). :func:`standing` judges a
@@ -254,6 +254,15 @@ def _bootstrap(log: TrustedLog, at: datetime) -> _Log | str:
     return _Log(parsed, log_id_of(parsed), log.root, at)
 
 
+def approved_bootstrap(log: TrustedLog, at: datetime) -> LogBootstrap | str:
+    """The bootstrap in ``log`` when it is canonical and owner-signed; else why not.
+
+    Owner approval only: it never says the log is pinned, current or selected.
+    """
+    found = _bootstrap(log, at)
+    return found if isinstance(found, str) else found.bootstrap
+
+
 def _checkpoint(raw: bytes, log: _Log) -> Checkpoint | str:
     """The signed checkpoint in ``raw`` when it is canonical, this log's and witness-signed."""
     try:
@@ -454,10 +463,12 @@ def current(witnessing: Witnessing) -> CheckpointVerdict:
 
 
 def require_current(witnessing: Witnessing) -> Checkpoint:
-    """The pinned checkpoint, only when the store's head is it; what a dependent relies on.
+    """The pinned checkpoint, only when the store's head is it: consistency, not selection.
 
     It never selects the log: any owner-approved bootstrap the caller offers
-    can pass (#1052).
+    can pass (#1052). A publication-facing dependent must use
+    :func:`lovspor.forarbeider.witness_log_registry.require_selected`, which
+    also requires the engine's reviewed selection of this log.
 
     Raises:
         ForarbeiderRefusedError: ``release_not_eligible: checkpoint_<status>``

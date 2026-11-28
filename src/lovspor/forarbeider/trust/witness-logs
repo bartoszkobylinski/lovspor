@@ -1,0 +1,10 @@
+# AR7b-1: the one authoritative witness log per (repository, purpose) (#738, #1052).
+#
+# One line per log:  <owner>/<repository> <purpose> <log_id>
+# <log_id> is the SHA-256 of the canonical owner-signed LogBootstrap
+# (witness_checkpoint_models.log_id_of). A repository and purpose appear once,
+# a log id once. Changing this file changes its digest, which
+# ENGINE_LOG_REGISTRY_SHA256 pins in code: a rotation is a reviewed engine change
+# of both, never a request, a witness store or an authority.
+#
+# Empty: no witness log is approved for production (D6, D11 proposed).
